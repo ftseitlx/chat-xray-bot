@@ -492,7 +492,7 @@ async def main():
     scheduler.start()
     
     # First, delete any existing webhook to avoid conflicts
-    await bot.delete_webhook()
+    await bot.delete_webhook(drop_pending_updates=True)
     
     # If webhook URL is provided or we're on Render (PORT env var is set), use webhook mode
     if settings.WEBHOOK_URL or os.environ.get("PORT"):
@@ -521,8 +521,8 @@ async def main():
         # Setup reports static directory
         app.router.add_static("/reports/", path=str(settings.REPORT_DIR), name="reports")
         
-        # Set webhook
-        await bot.set_webhook(url=settings.WEBHOOK_URL)
+        # Set webhook with drop_pending_updates=True to avoid conflicts
+        await bot.set_webhook(url=settings.WEBHOOK_URL, drop_pending_updates=True)
         logger.info(f"Webhook set at: {settings.WEBHOOK_URL}")
         
         # Setup application
@@ -533,7 +533,7 @@ async def main():
     else:
         # Use polling mode only for local development
         logger.info("Starting in polling mode as WEBHOOK_URL is not set and not running on Render")
-        await dp.start_polling(bot)
+        await dp.start_polling(bot, drop_pending_updates=True)
 
 
 if __name__ == "__main__":
