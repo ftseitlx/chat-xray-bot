@@ -167,47 +167,103 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
     Returns:
         HTML string for the report
     """
+    # Calculate approximate token count for the dataset
+    def estimate_tokens(data_str: str) -> int:
+        # Each character is approximately 0.25 tokens for UTF-8 text
+        return int(len(data_str) * 0.25)
+    
+    # Function to get a balanced sample from messages
+    def get_balanced_sample(msgs, target_size):
+        if len(msgs) <= target_size:
+            return msgs
+            
+        # Calculate how many messages to take from each section
+        section_size = target_size // 3
+        
+        # Ensure we have at least some messages from each section
+        first_section = msgs[:section_size]
+        
+        # For middle section, pick from the actual middle
+        middle_start = max(section_size, len(msgs) // 2 - section_size // 2)
+        middle_end = min(middle_start + section_size, len(msgs))
+        middle_section = msgs[middle_start:middle_end]
+        
+        # Last section
+        last_section = msgs[-section_size:]
+        
+        return first_section + middle_section + last_section
+    
+    # Extract key quotes from all messages for preservation
+    def extract_key_quotes(msgs):
+        quotes = []
+        for msg in msgs:
+            if "key_quotes" in msg and msg["key_quotes"]:
+                for quote in msg["key_quotes"]:
+                    if quote and len(quote) > 5:  # Ensure it's a meaningful quote
+                        quotes.append({
+                            "quote": quote,
+                            "author": msg.get("author", "Unknown"),
+                            "sentiment": msg.get("sentiment", "neutral"),
+                            "emotion": msg.get("emotion", "unknown")
+                        })
+        return quotes
+    
     # We're using GPT-4 Turbo which has a 128K token context window,
-    # so we can handle much larger inputs, but still do some sampling for very large chats
-    if len(results) > 1000:
-        # Take a sample to reduce token count for extremely large chats
-        logger.info(f"Very large result set ({len(results)} messages). Sampling for meta-analysis.")
-        
-        # Intelligent sampling - keep first, last and some middle parts
-        sampled_results = []
-        
-        # Keep first 200 messages
-        sampled_results.extend(results[:200])
-        
-        # Keep middle 300 messages (if available)
-        middle_start = max(200, len(results) // 2 - 150)
-        middle_end = min(middle_start + 300, len(results))
-        sampled_results.extend(results[middle_start:middle_end])
-        
-        # Keep last 200 messages
-        sampled_results.extend(results[-200:])
-        
-        # Use sampled results instead
-        results_to_process = sampled_results
-        logger.info(f"Sampled down to {len(results_to_process)} messages for meta-analysis")
+    # but we need to be more careful with sampling for large chats
+    
+    # Extract all key quotes from the original results for preservation
+    all_key_quotes = extract_key_quotes(results)
+    logger.info(f"Extracted {len(all_key_quotes)} key quotes for preservation")
+    
+    # Start with an optimistic sampling approach
+    max_context_tokens = 110000  # Leave room for prompt and response
+    
+    # First sample: if more than 500 messages, start reducing
+    if len(results) > 500:
+        # Initial sampling - we'll refine further if needed
+        target_sample_size = min(500, len(results))
+        results_to_process = get_balanced_sample(results, target_sample_size)
+        logger.info(f"Initial sampling: {len(results)} messages → {len(results_to_process)} messages")
     else:
-        # GPT-4 Turbo can handle up to 1000 messages easily
         results_to_process = results
     
-    # Convert results to a JSON string
-    results_json = json.dumps(results_to_process, indent=2)
+    # Convert to JSON to check token count
+    results_json = json.dumps(results_to_process, indent=None)
+    estimated_tokens = estimate_tokens(results_json)
+    
+    # If still too large, reduce further
+    if estimated_tokens > max_context_tokens:
+        # Calculate appropriate sample size based on token estimate
+        reduction_factor = max_context_tokens / estimated_tokens
+        new_target_size = max(90, int(len(results_to_process) * reduction_factor))
+        
+        # Re-sample with the calculated target size
+        results_to_process = get_balanced_sample(results, new_target_size)
+        results_json = json.dumps(results_to_process, indent=None)
+        estimated_tokens = estimate_tokens(results_json)
+        
+        logger.info(f"Reduced sample: {len(results_to_process)} messages, estimated {estimated_tokens} tokens")
     
     retry_count = 0
     backoff_time = settings.RETRY_DELAY_SECONDS  # Start with configured delay
     
     while retry_count <= max_retries:
         try:
+            # Preserve quotes if we had to reduce the dataset
+            quotes_prompt = ""
+            if len(results_to_process) < len(results) and all_key_quotes:
+                quotes_json = json.dumps(all_key_quotes[:50], indent=None, ensure_ascii=False)  # Limit to 50 most important quotes
+                quotes_prompt = f"""
+                ВАЖНО: Включите эти ключевые цитаты в раздел "Ключевые цитаты", даже если они не присутствуют в сокращенной выборке сообщений:
+                {quotes_json}
+                """
+            
             # Call the OpenAI API with GPT-4 Turbo
             response = await client.chat.completions.create(
                 model=settings.META_MODEL,
                 messages=[
                     {"role": "system", "content": META_PROMPT},
-                    {"role": "user", "content": f"Создайте психологический отчет на РУССКОМ языке на основе предоставленных данных:\n\n{results_json}"}
+                    {"role": "user", "content": f"Создайте психологический отчет на РУССКОМ языке на основе предоставленных данных:\n\n{results_json}\n\n{quotes_prompt}"}
                 ],
                 temperature=0.7,
                 max_tokens=4000,  # GPT-4 Turbo allows for larger response sizes
@@ -231,6 +287,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
                     <html>
                     <head>
                         <meta charset="UTF-8">
+                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
                         <title>Chat X-Ray: Психологический анализ отношений</title>
                         <style>
                             body {{ font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }}
@@ -320,8 +377,13 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
                     </html>
                     """
             
-            # Add disclaimer about sampling if applicable
-            if len(results) > 1000:
+            # Add 'viewport' meta tag if it's not already present
+            if "<meta name=\"viewport\"" not in html_content:
+                html_content = html_content.replace("<head>", 
+                    "<head>\n        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">")
+                
+            # Add sampling disclaimer if applicable
+            if len(results_to_process) < len(results):
                 # Add a note about sampling at the top of the report
                 import re
                 
@@ -331,8 +393,8 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
                     # Insert after the body tag
                     sampling_notice = f"""
                     <div style="background-color: #fff3cd; padding: 15px; margin-bottom: 20px; border-radius: 5px; border: 1px solid #ffeeba;">
-                        <strong>Note:</strong> This analysis is based on a sample of {len(results_to_process)} messages from your total conversation of {len(results)} messages.
-                        The sample includes the beginning, middle, and end sections of your chat to provide a balanced analysis.
+                        <strong>Примечание:</strong> Этот анализ основан на выборке из {len(results_to_process)} сообщений из общего объема вашей беседы ({len(results)} сообщений).
+                        Выборка включает начало, середину и конец вашего чата для обеспечения сбалансированного анализа.
                     </div>
                     """
                     html_content = re.sub(body_pattern, lambda m: m.group(0) + sampling_notice, html_content)
@@ -349,22 +411,10 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
                 backoff_time *= 2  # Exponential backoff
                 
                 # If this is the last retry, reduce the sample size further
-                if retry_count == max_retries and len(results_to_process) > 300:
-                    # Reduce to about 300 messages for the final attempt
-                    truncated_results = []
-                    
-                    # Keep beginning, middle, and end with smaller samples
-                    truncated_results.extend(results_to_process[:100])
-                    
-                    # Middle section
-                    middle_start = len(results_to_process) // 2 - 50
-                    truncated_results.extend(results_to_process[middle_start:middle_start+100])
-                    
-                    # End section
-                    truncated_results.extend(results_to_process[-100:])
-                    
-                    results_to_process = truncated_results
-                    results_json = json.dumps(results_to_process, indent=2)
+                if retry_count == max_retries and len(results_to_process) > 150:
+                    # Reduce to about 150 messages for the final attempt
+                    results_to_process = get_balanced_sample(results, 150)
+                    results_json = json.dumps(results_to_process, indent=None)
                     logger.info(f"Финальная попытка с уменьшенной выборкой из {len(results_to_process)} сообщений")
             else:
                 logger.error("Достигнуто максимальное количество попыток. Возвращаем шаблон ошибки.")
@@ -375,75 +425,56 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
             
             if "context_length_exceeded" in str(e):
                 # Handle context length exceeded error specifically
-                logger.warning("Context length exceeded, trying with a smaller sample")
+                logger.warning("Context length exceeded, trying with a minimal sample")
                 
-                # Extract and preserve key quotes from the original results
-                preserved_quotes = []
-                for result in results_to_process:
-                    if "key_quotes" in result and result["key_quotes"]:
-                        for quote in result["key_quotes"]:
-                            if quote and len(quote) > 5:  # Ensure it's a meaningful quote
-                                preserved_quotes.append({
-                                    "quote": quote,
-                                    "author": result.get("author", "Unknown"),
-                                    "sentiment": result.get("sentiment", "neutral"),
-                                    "emotion": result.get("emotion", "unknown")
-                                })
+                # Use a much smaller sample for this retry
+                minimal_sample_size = 90
+                minimal_sample = get_balanced_sample(results, minimal_sample_size)
+                results_json = json.dumps(minimal_sample, indent=None)
                 
-                # Reduce the sample size dramatically
-                if len(results_to_process) > 100:
-                    reduced_sample = []
-                    
-                    # Take just 30 messages from start, middle and end
-                    reduced_sample.extend(results_to_process[:30])
-                    
-                    middle_idx = len(results_to_process) // 2
-                    reduced_sample.extend(results_to_process[middle_idx-15:middle_idx+15])
-                    
-                    reduced_sample.extend(results_to_process[-30:])
-                    
-                    results_to_process = reduced_sample
-                    results_json = json.dumps(results_to_process, indent=2)
-                    
-                    logger.info(f"Retrying with minimal sample of {len(results_to_process)} messages")
-                    
-                    # Add preserved quotes to the user prompt
-                    quotes_json = json.dumps(preserved_quotes, indent=2)
+                logger.info(f"Retrying with minimal sample of {len(minimal_sample)} messages")
+                
+                # Generate quotes prompt from all key quotes
+                quotes_prompt = ""
+                if all_key_quotes:
+                    quotes_json = json.dumps(all_key_quotes[:30], indent=None, ensure_ascii=False)  # Limit to 30 most important quotes
                     quotes_prompt = f"""
                     ВАЖНО: Включите эти ключевые цитаты в раздел "Ключевые цитаты", даже если они не присутствуют в сокращенной выборке сообщений:
                     {quotes_json}
                     """
+                
+                # Try once more with the minimal sample
+                try:
+                    response = await client.chat.completions.create(
+                        model=settings.META_MODEL,
+                        messages=[
+                            {"role": "system", "content": META_PROMPT},
+                            {"role": "user", "content": f"Создайте психологический отчет на РУССКОМ языке на основе этой выборки сообщений:\n\n{results_json}\n\n{quotes_prompt}"}
+                        ],
+                        temperature=0.7,
+                        max_tokens=4000,
+                        n=1
+                    )
                     
-                    # Try once more with the reduced sample
-                    try:
-                        response = await client.chat.completions.create(
-                            model=settings.META_MODEL,
-                            messages=[
-                                {"role": "system", "content": META_PROMPT},
-                                {"role": "user", "content": f"Here is a sample of the analyzed chat data in JSON format:\n\n{results_json}\n\n{quotes_prompt}"}
-                            ],
-                            temperature=0.7,
-                            max_tokens=4000,
-                            n=1
-                        )
+                    html_content = response.choices[0].message.content
+                    
+                    # Add sampling disclaimer
+                    import re
+                    body_pattern = r'<body[^>]*>'
+                    if re.search(body_pattern, html_content):
+                        sampling_notice = f"""
+                        <div style="background-color: #fff3cd; padding: 15px; margin-bottom: 20px; border-radius: 5px; border: 1px solid #ffeeba;">
+                            <strong>Примечание:</strong> Из-за большого размера вашей беседы ({len(results)} сообщений), 
+                            анализ основан на минимальной выборке из {len(minimal_sample)} сообщений, чтобы обеспечить 
+                            оптимальную работу искусственного интеллекта. Выборка включает сообщения из начала, 
+                            середины и конца вашего чата для обеспечения сбалансированного анализа.
+                        </div>
+                        """
+                        html_content = re.sub(body_pattern, lambda m: m.group(0) + sampling_notice, html_content)
                         
-                        html_content = response.choices[0].message.content
-                        
-                        # Add sampling disclaimer
-                        import re
-                        body_pattern = r'<body[^>]*>'
-                        if re.search(body_pattern, html_content):
-                            sampling_notice = f"""
-                            <div style="background-color: #fff3cd; padding: 15px; margin-bottom: 20px; border-radius: 5px; border: 1px solid #ffeeba;">
-                                <strong>Note:</strong> Due to the large size of your conversation, this analysis is based on a limited sample of {len(results_to_process)} messages 
-                                from your total conversation of {len(results)} messages.
-                            </div>
-                            """
-                            html_content = re.sub(body_pattern, lambda m: m.group(0) + sampling_notice, html_content)
-                            
-                        return html_content
-                    except Exception as inner_error:
-                        logger.error(f"Error in retry with minimal sample: {inner_error}")
+                    return html_content
+                except Exception as inner_error:
+                    logger.error(f"Error in retry with minimal sample: {inner_error}")
             
             # Return a basic error HTML
             return f"""
