@@ -1,9 +1,13 @@
 import os
+import logging
 from pathlib import Path
 from typing import Optional
 
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
+
+# Configure logger
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -80,4 +84,9 @@ settings = Settings()
 
 # Create directories if they don't exist
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-os.makedirs(settings.REPORT_DIR, exist_ok=True) 
+os.makedirs(settings.REPORT_DIR, exist_ok=True)
+
+# Automatically construct webhook URL if host is provided but URL is not
+if settings.WEBHOOK_HOST and not settings.WEBHOOK_URL:
+    settings.WEBHOOK_URL = f"{settings.WEBHOOK_HOST}{settings.WEBHOOK_PATH}"
+    logger.info(f"Constructed webhook URL: {settings.WEBHOOK_URL}") 

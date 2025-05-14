@@ -284,7 +284,8 @@ async def handle_document(message: Message):
 
 # Health check endpoint
 async def health_check(request):
-    return web.Response(text="ОК", status=200)
+    logger.info("Health check request received")
+    return web.Response(text="OK", status=200)
 
 
 async def main():
@@ -314,6 +315,9 @@ async def main():
     
     # If webhook URL is provided, use webhook mode
     if settings.WEBHOOK_URL:
+        logger.info(f"Starting in webhook mode with URL: {settings.WEBHOOK_URL}")
+        logger.info(f"Web server will listen on {settings.HOST}:{settings.PORT}")
+        
         # Create web application
         app = web.Application()
         
@@ -327,16 +331,22 @@ async def main():
         # Setup health check endpoint
         app.router.add_get("/health", health_check)
         
+        # Setup reports static directory
+        app.router.add_static("/reports/", path=str(settings.REPORT_DIR), name="reports")
+        
         # Set webhook
         await bot.set_webhook(url=settings.WEBHOOK_URL)
+        logger.info(f"Webhook set at: {settings.WEBHOOK_URL}")
         
         # Setup application
         setup_application(app, dp, bot=bot)
         
         # Start web application
+        logger.info("Starting web application")
         web.run_app(app, host=settings.HOST, port=settings.PORT)
     else:
         # Use polling mode
+        logger.info("Starting in polling mode as WEBHOOK_URL is not set")
         await bot.delete_webhook()
         await dp.start_polling(bot)
 
