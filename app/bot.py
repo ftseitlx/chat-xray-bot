@@ -52,9 +52,28 @@ dp = Dispatcher(storage=MemoryStorage())
 main_router = Router()
 
 
+# Helper function to safely send messages in a task
+async def safe_send_message(message: Message, text: str, **kwargs):
+    """Send a message safely in a task to avoid timeout context errors"""
+    try:
+        # Create a task to send the message
+        task = asyncio.create_task(message.answer(text, **kwargs))
+        return await task
+    except Exception as e:
+        logger.error(f"Error sending message: {e}")
+        # Try one more time with a delay
+        await asyncio.sleep(0.5)
+        try:
+            return await message.answer(text, **kwargs)
+        except Exception as e2:
+            logger.error(f"Second attempt failed: {e2}")
+            return None
+
+
 @main_router.message(CommandStart())
 async def command_start(message: Message):
-    await message.answer(
+    await safe_send_message(
+        message,
         f"👋 Добро пожаловать в Chat X-Ray Bot, {message.from_user.first_name}!\n\n"
         f"Я могу проанализировать историю вашего общения и предоставить психологический анализ ваших отношений.\n\n"
         f"Просто отправьте мне файл экспорта чата (в формате .txt или .html, до 2 МБ), и я проведу глубокий анализ для вас.\n\n"
@@ -72,7 +91,8 @@ async def privacy_command(message: Message):
     with open("docs/privacy_policy.md", "r") as f:
         privacy_text = f.read()
     
-    await message.answer(
+    await safe_send_message(
+        message,
         "Наша Политика Конфиденциальности:\n\n"
         f"{privacy_text[:3900]}...\n\n"  # Limit to Telegram's message size
         "Для получения полной информации посетите наш веб-сайт."
@@ -81,7 +101,8 @@ async def privacy_command(message: Message):
 
 @main_router.message(Command("help"))
 async def help_command(message: Message):
-    await message.answer(
+    await safe_send_message(
+        message,
         "<b>Как использовать Chat X-Ray:</b>\n\n"
         "1. Экспортируйте историю чата из вашего мессенджера в текстовый файл (.txt) или HTML-файл (.html)\n"
         "2. Отправьте файл этому боту (размер файла должен быть не более 2 МБ)\n"
@@ -101,7 +122,8 @@ async def help_command(message: Message):
 @main_router.message(Command("about"))
 async def about_command(message: Message):
     """Handle the /about command"""
-    await message.answer(
+    await safe_send_message(
+        message,
         "<b>О психологическом анализе Chat X-Ray:</b>\n\n"
         "Наш анализ основан на нескольких ключевых психологических теориях:\n\n"
         "1. <b>Теория привязанности Габора Мате</b> - анализ моделей привязанности и их влияния на общение\n\n"
@@ -122,7 +144,8 @@ async def echo_message(message: Message):
     if message.text.startswith('/'):
         return
         
-    await message.answer(
+    await safe_send_message(
+        message,
         f"✓ Я получил ваше сообщение:\n\n"
         f"\"{message.text}\"\n\n"
         f"Для анализа чата, пожалуйста, отправьте файл с историей переписки (.txt или .html)."
@@ -198,6 +221,24 @@ async def extract_insights_for_telegram(html_content: str) -> str:
     return insights
 
 
+# Helper function to safely edit a message
+async def safe_edit_message(message: Message, text: str, **kwargs):
+    """Edit a message safely in a task to avoid timeout context errors"""
+    try:
+        # Create a task to edit the message
+        task = asyncio.create_task(message.edit_text(text, **kwargs))
+        return await task
+    except Exception as e:
+        logger.error(f"Error editing message: {e}")
+        # Try one more time with a delay
+        await asyncio.sleep(0.5)
+        try:
+            return await message.edit_text(text, **kwargs)
+        except Exception as e2:
+            logger.error(f"Second edit attempt failed: {e2}")
+            return None
+
+
 @upload_router.message(F.document)
 async def handle_document(message: Message):
     """Handle document uploads and process valid text or HTML files"""
@@ -206,7 +247,7 @@ async def handle_document(message: Message):
     # Check if document exists
     if not message.document:
         logger.warning(f"Document not found in message from user {message.from_user.id}")
-        await message.answer("⚠️ Документ не найден. Пожалуйста, отправьте текстовый файл или HTML-экспорт чата.")
+        await safe_send_message(message, "⚠️ Документ не найден. Пожалуйста, отправьте текстовый файл или HTML-экспорт чата.")
         return
     
     # Log document details
@@ -216,7 +257,8 @@ async def handle_document(message: Message):
     valid_mime_types = ["text/plain", "text/html"]
     if message.document.mime_type not in valid_mime_types:
         logger.warning(f"Invalid mime type: {message.document.mime_type} from user {message.from_user.id}")
-        await message.answer(
+        await safe_send_message(
+            message,
             "⚠️ Неверный формат файла. Пожалуйста, отправьте текстовый файл (.txt) или HTML-экспорт чата (.html)."
         )
         return
@@ -224,7 +266,8 @@ async def handle_document(message: Message):
     # Check file size
     if message.document.file_size > settings.MAX_FILE_SIZE:
         logger.warning(f"File too large: {message.document.file_size} bytes from user {message.from_user.id}")
-        await message.answer(
+        await safe_send_message(
+            message,
             f"⚠️ Файл слишком большой. Максимальный размер {settings.MAX_FILE_SIZE // (1024 * 1024)} МБ."
         )
         return
@@ -234,7 +277,7 @@ async def handle_document(message: Message):
     
     try:
         # Send acknowledgment message
-        await message.answer("✅ Ваш файл получен. Начинаю анализ...")
+        ack_message = await safe_send_message(message, "✅ Ваш файл получен. Начинаю анализ...")
         logger.info("Acknowledgment message sent")
         
         # Process the file by importing here to avoid circular imports
@@ -262,10 +305,14 @@ async def handle_document(message: Message):
         # Download the file
         logger.info("Starting file download")
         try:
-            await bot.download(
-                message.document,
-                destination=upload_file_path
+            # Create a task for downloading
+            download_task = asyncio.create_task(
+                bot.download(
+                    message.document,
+                    destination=upload_file_path
+                )
             )
+            await download_task
             logger.info(f"File downloaded successfully to {upload_file_path}")
             
             # Verify file was downloaded correctly
@@ -274,20 +321,21 @@ async def handle_document(message: Message):
                 logger.info(f"Downloaded file size: {file_size} bytes")
                 if file_size == 0:
                     logger.error("Downloaded file is empty")
-                    await message.answer("❌ Ошибка: загруженный файл пуст. Пожалуйста, проверьте файл и попробуйте снова.")
+                    await safe_send_message(message, "❌ Ошибка: загруженный файл пуст. Пожалуйста, проверьте файл и попробуйте снова.")
                     return
             else:
                 logger.error(f"File not found after download: {upload_file_path}")
-                await message.answer("❌ Ошибка при сохранении файла. Пожалуйста, попробуйте снова.")
+                await safe_send_message(message, "❌ Ошибка при сохранении файла. Пожалуйста, попробуйте снова.")
                 return
         except Exception as download_error:
             logger.exception(f"Error downloading file: {download_error}")
-            await message.answer("❌ Ошибка при загрузке файла. Пожалуйста, попробуйте снова.")
+            await safe_send_message(message, "❌ Ошибка при загрузке файла. Пожалуйста, попробуйте снова.")
             return
         
         # Let the user know we're processing and all data is anonymized
         logger.info("Sending status message")
-        status_message = await message.answer(
+        status_message = await safe_send_message(
+            message,
             "🔍 <b>Анализирую чат...</b>\n\n"
             "⚠️ <b>Важно:</b> Все личные данные в чате анонимизируются при обработке. "
             "Имена заменяются общими идентификаторами, а чувствительная информация не сохраняется. "
@@ -303,13 +351,14 @@ async def handle_document(message: Message):
         
         if num_chunks == 0:
             logger.warning(f"No chunks extracted from file {upload_file_path}")
-            await message.answer("⚠️ Не удалось обработать файл. Возможно, он пуст или имеет неправильный формат?")
+            await safe_send_message(message, "⚠️ Не удалось обработать файл. Возможно, он пуст или имеет неправильный формат?")
             os.unlink(upload_file_path)
             return
         
         # Process chunks with GPT-3.5
         logger.info(f"Starting chunk processing with {settings.PRIMARY_MODEL}")
-        await status_message.edit_text(
+        await safe_edit_message(
+            status_message,
             f"🔄 <b>Обрабатываю {num_chunks} фрагментов данных чата</b> (параллельно)...\n\n"
             "⚠️ <b>Важно:</b> Все личные данные в чате анонимизируются при обработке. "
             "Конфиденциальность ваших сообщений сохраняется."
@@ -321,7 +370,7 @@ async def handle_document(message: Message):
             
             # Generate meta report with GPT-4
             logger.info(f"Starting meta report generation with {settings.META_MODEL}")
-            await status_message.edit_text("✨ Создаю психологические выводы и генерирую отчет...")
+            await safe_edit_message(status_message, "✨ Создаю психологические выводы и генерирую отчет...")
             
             try:
                 html_content = await generate_meta_report(analysis_results)
@@ -357,17 +406,18 @@ async def handle_document(message: Message):
                     
                     # First send insights as HTML message
                     logger.info("Sending insights message")
-                    await message.answer(
+                    await safe_send_message(
+                        message,
                         telegram_insights,
                         parse_mode=ParseMode.HTML
                     )
                     
                     # Then send the full report as a document
                     logger.info("Sending report document")
-                    await message.answer_document(
+                    await asyncio.create_task(message.answer_document(
                         FSInputFile(report_file_path),
                         caption="Ваш полный отчет Chat X-Ray готов. Этот файл будет доступен в течение 72 часов."
-                    )
+                    ))
                 else:
                     # In production with webhook, send insights and a link
                     logger.info("Running in webhook mode, sending link to report")
@@ -375,7 +425,8 @@ async def handle_document(message: Message):
                     
                     # First send insights as HTML message
                     logger.info("Sending insights message")
-                    await message.answer(
+                    await safe_send_message(
+                        message,
                         telegram_insights,
                         parse_mode=ParseMode.HTML
                     )
@@ -392,7 +443,8 @@ async def handle_document(message: Message):
                     )
                     
                     logger.info("Sending download button message")
-                    await message.answer(
+                    await safe_send_message(
+                        message,
                         "📋 Для получения полного отчета нажмите на кнопку ниже:",
                         reply_markup=download_markup
                     )
@@ -412,7 +464,8 @@ async def handle_document(message: Message):
                 
             except openai.RateLimitError as e:
                 logger.error(f"Rate limit error during meta analysis: {e}")
-                await status_message.edit_text(
+                await safe_edit_message(
+                    status_message,
                     "⚠️ Мы достигли ограничения запросов при создании отчета.\n\n"
                     "Это обычно происходит при обработке очень больших чатов или в периоды пиковой нагрузки.\n\n"
                     "Пожалуйста, попробуйте загрузить файл меньшего размера или повторите попытку через несколько минут."
@@ -420,7 +473,8 @@ async def handle_document(message: Message):
                 
             except Exception as e:
                 logger.exception(f"Error in meta analysis: {e}")
-                await status_message.edit_text(
+                await safe_edit_message(
+                    status_message,
                     "❌ Произошла ошибка при создании отчета.\n\n"
                     f"Детали ошибки: {str(e)}\n\n"
                     "Пожалуйста, попробуйте еще раз или обратитесь в поддержку, если проблема не исчезнет."
@@ -428,7 +482,8 @@ async def handle_document(message: Message):
                 
         except openai.RateLimitError as e:
             logger.error(f"Rate limit error during chunk processing: {e}")
-            await status_message.edit_text(
+            await safe_edit_message(
+                status_message,
                 "⚠️ Мы достигли ограничения запросов при анализе вашего чата.\n\n"
                 "Это обычно происходит при обработке очень больших чатов или в периоды пиковой нагрузки.\n\n"
                 "Пожалуйста, попробуйте загрузить файл меньшего размера или повторите попытку через несколько минут."
@@ -436,7 +491,8 @@ async def handle_document(message: Message):
             
         except Exception as e:
             logger.exception(f"Error in chunk processing: {e}")
-            await status_message.edit_text(
+            await safe_edit_message(
+                status_message,
                 "❌ Произошла ошибка при анализе вашего чата.\n\n"
                 f"Детали ошибки: {str(e)}\n\n"
                 "Пожалуйста, попробуйте еще раз или обратитесь в поддержку, если проблема не исчезнет."
@@ -447,7 +503,8 @@ async def handle_document(message: Message):
         if settings.SENTRY_DSN:
             sentry_sdk.capture_exception(e)
         
-        await message.answer(
+        await safe_send_message(
+            message,
             "❌ Извините, произошла ошибка при обработке вашего файла. Пожалуйста, попробуйте позже."
         )
         
