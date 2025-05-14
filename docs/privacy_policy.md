@@ -1,56 +1,61 @@
 # Privacy Policy for Chat X-Ray Bot
 
-*Last updated: [Date]*
+Last updated: May 14, 2025
 
 ## Introduction
 
-This Privacy Policy outlines how the Chat X-Ray Bot ("we", "our", or "the Bot") collects, uses, and protects your information when you use our Telegram bot service.
+Your privacy is important to us. This Privacy Policy explains how Chat X-Ray Bot ("we", "our", or "the bot") collects, uses, and protects your data when you use our Telegram bot service.
 
-## Information We Collect
+## Data Collection
 
-The Bot may collect the following information:
-- Telegram User ID and username
-- Chat file content that you upload for analysis
-- Timestamps of your interactions with the Bot
+When you use Chat X-Ray Bot, we temporarily collect and process the following information:
 
-## How We Use Your Information
+- Chat files that you voluntarily upload for analysis
+- Basic Telegram user information (user ID, first name, username if available)
+- Timestamps of when you interact with the bot
 
-We use your information to:
-- Provide the chat analysis service you requested
-- Generate and deliver PDF reports based on your uploads
-- Improve our service based on usage patterns
+## How We Use Your Data
 
-## Data Storage and Retention
+The data collected is used exclusively for:
 
-- Uploaded chat files are automatically deleted within 1 hour of processing
-- Generated reports are automatically deleted after 72 hours
-- We do not permanently store the content of your chats
+1. Analyzing your chat history to generate psychological insights
+2. Providing you with the analysis results
+3. Improving the bot's functionality and accuracy
 
-## Data Security
+## Data Storage and Security
 
-We implement reasonable security measures to protect your information:
-- All files are stored temporarily on secure servers
-- Access to server infrastructure is restricted
+We prioritize the security of your data:
 
-## Third-Party Services
+- All uploaded chat files are automatically deleted after 1 hour
+- Generated reports are accessible for 72 hours before being permanently deleted
+- All personal identifiers in chat files are anonymized during processing
+- We use industry-standard security measures to protect data during processing
 
-We utilize the following third-party services:
-- OpenAI API for natural language processing
-- Telegram API for bot functionality
+## Data Sharing
+
+We do not:
+- Sell your data to third parties
+- Share your data with advertisers
+- Use your data for targeted advertising
+
+We may share anonymized data with:
+- OpenAI's API for generating analysis (subject to OpenAI's privacy policy)
+- Sentry.io for error tracking (when applicable)
 
 ## Your Rights
 
 You have the right to:
-- Request information about what data we have about you
-- Request deletion of your data
+- Receive information about how your data is used
+- Request deletion of any stored data related to your usage
+- Lodge a complaint with supervisory authorities
 
 ## Changes to This Policy
 
-We may update this Privacy Policy from time to time. Any changes will be posted in the Bot's help menu.
+We may update this Privacy Policy from time to time. Any changes will be posted in this document.
 
 ## Contact Us
 
-If you have questions about this Privacy Policy, please contact us via [contact email].
+If you have any questions about this Privacy Policy, please contact us via Telegram.
 
 ---
 
