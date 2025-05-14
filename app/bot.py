@@ -15,7 +15,6 @@ from aiogram.types import (
     InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 )
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiogram.client.default import DefaultBotProperties
 from aiohttp import web
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import re
@@ -44,7 +43,7 @@ if settings.SENTRY_DSN:
 # Initialize bot and dispatcher with updated syntax for aiogram 3.x
 bot = Bot(
     token=settings.BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    parse_mode=ParseMode.HTML
 )
 dp = Dispatcher(storage=MemoryStorage())
 
