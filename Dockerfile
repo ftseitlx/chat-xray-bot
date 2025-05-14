@@ -38,6 +38,9 @@ COPY . .
 # Create directories for uploads and reports
 RUN mkdir -p uploads reports
 
+# Expose the port that the application uses
+EXPOSE 8080
+
 # Start the bot
 CMD ["python", "-m", "app.bot"]
 
