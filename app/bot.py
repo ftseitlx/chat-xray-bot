@@ -452,9 +452,8 @@ async def main():
         # Setup application
         setup_application(app, dp, bot=bot)
         
-        # Start web application
-        logger.info("Starting web application")
-        web.run_app(app, host=settings.HOST, port=settings.PORT)
+        # Return the app to be run by the caller
+        return app
     else:
         # Use polling mode only for local development
         logger.info("Starting in polling mode as WEBHOOK_URL is not set and not running on Render")
@@ -462,4 +461,19 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    # Setup event loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    try:
+        # Run the main function
+        app = loop.run_until_complete(main())
+        
+        # If we're in webhook mode, run the web app
+        if app:
+            web.run_app(app, host=settings.HOST, port=settings.PORT)
+    except Exception as e:
+        logger.error(f"Error in main function: {e}")
+    finally:
+        # Clean up
+        loop.close() 
