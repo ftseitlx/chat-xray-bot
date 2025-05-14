@@ -32,6 +32,10 @@ RUN poetry config virtualenvs.create false
 # Install dependencies
 RUN poetry install --no-interaction --no-ansi --no-dev
 
+# Copy requirements file and install as fallback
+COPY requirements.txt ./
+RUN pip install -r requirements.txt
+
 # Copy application code
 COPY . .
 
