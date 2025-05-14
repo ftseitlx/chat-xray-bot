@@ -35,7 +35,8 @@ logger = logging.getLogger(__name__)
 
 # Add a distinctive log message to verify this version is running
 logger.info("========================================")
-logger.info("TIMEOUT FIX VERSION 2025-05-14 ACTIVATED")
+logger.info("TIMEOUT FIX VERSION 2025-05-14-001 ACTIVATED")
+logger.info("REDEPLOYMENT FIX - TIMEOUT ERROR RESOLUTION")
 logger.info("This version includes fixes for the timeout context manager error")
 logger.info("========================================")
 
