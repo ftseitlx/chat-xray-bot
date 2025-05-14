@@ -565,12 +565,34 @@ async def main():
         # Create web application
         app = web.Application()
         
-        # Setup webhook handler
-        webhook_requests_handler = SimpleRequestHandler(
-            dispatcher=dp,
-            bot=bot,
-        )
-        webhook_requests_handler.register(app, path=settings.WEBHOOK_PATH)
+        # Define a custom webhook handler function that properly handles tasks
+        async def handle_webhook(request):
+            try:
+                # Get the update data from the request
+                update_data = await request.json()
+                logger.info(f"Received webhook update: {update_data.get('update_id')}")
+                
+                # Process the update in a separate task to avoid timeout context issues
+                asyncio.create_task(
+                    process_update(update_data)
+                )
+                
+                # Return a success response immediately
+                return web.Response(status=200)
+            except Exception as e:
+                logger.error(f"Error in webhook handler: {e}")
+                return web.Response(status=500)
+        
+        # Function to process updates in a separate task
+        async def process_update(update_data):
+            try:
+                # Let the dispatcher process the update
+                await dp.feed_raw_update(bot=bot, update=update_data)
+            except Exception as e:
+                logger.error(f"Error processing update: {e}")
+        
+        # Register the custom webhook handler
+        app.router.add_post(settings.WEBHOOK_PATH, handle_webhook)
         
         # Setup health check endpoint
         app.router.add_get("/health", health_check)
@@ -581,9 +603,6 @@ async def main():
         # Set webhook with drop_pending_updates=True to avoid conflicts
         await bot.set_webhook(url=settings.WEBHOOK_URL, drop_pending_updates=True)
         logger.info(f"Webhook set at: {settings.WEBHOOK_URL}")
-        
-        # Setup application
-        setup_application(app, dp, bot=bot)
         
         # Return the app to be run by the caller
         return app
