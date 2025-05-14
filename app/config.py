@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", 3))
     RETRY_DELAY_SECONDS: int = int(os.getenv("RETRY_DELAY_SECONDS", 1))
     
+    # Parallelization settings
+    OPENAI_CONCURRENCY_LIMIT: int = int(os.getenv("OPENAI_CONCURRENCY_LIMIT", 3))
+    
     # Large file handling
     MAX_ALLOWED_MESSAGES: int = int(os.getenv("MAX_ALLOWED_MESSAGES", 5000))
     LARGE_CHAT_THRESHOLD: int = int(os.getenv("LARGE_CHAT_THRESHOLD", 1000))

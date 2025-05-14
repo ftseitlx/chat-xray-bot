@@ -1,7 +1,9 @@
 import logging
 import re
+import os
 from pathlib import Path
 from typing import List, Dict, Any
+from bs4 import BeautifulSoup
 
 from app.config import settings
 
@@ -10,12 +12,150 @@ logger = logging.getLogger(__name__)
 # Adjust to a smaller chunk size to avoid rate limits
 MAX_MESSAGES_PER_CHUNK = 25  # Reduced from previous value
 
-def extract_messages(file_path: Path) -> List[Dict[str, Any]]:
+def extract_message_parts(line: str) -> Dict[str, str]:
     """
-    Extract messages from a chat file.
+    Extract author, timestamp, and content from a single line of chat.
     
     Args:
-        file_path: Path to the chat file
+        line: A single line from the chat log
+        
+    Returns:
+        Dictionary with timestamp, author, and content
+    """
+    # Initialize empty parts
+    parts = {
+        "timestamp": "",
+        "author": "",
+        "content": line  # Default to whole line if no pattern matches
+    }
+    
+    # Try WhatsApp/standard format: [timestamp] Author: Content
+    # or DD.MM.YYYY, HH:MM - Author: Content
+    whatsapp_patterns = [
+        r'^\[(?P<timestamp>.*?)\] (?P<author>.*?): (?P<content>.*)$',
+        r'^(?P<timestamp>\d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}) - (?P<author>.*?): (?P<content>.*)$',
+        r'^(?P<timestamp>\d{2}/\d{2}/\d{4}, \d{2}:\d{2}) - (?P<author>.*?): (?P<content>.*)$'
+    ]
+    
+    for pattern in whatsapp_patterns:
+        match = re.match(pattern, line)
+        if match:
+            parts.update(match.groupdict())
+            return parts
+    
+    # Try other common patterns
+    other_patterns = [
+        # Discord-like: Author [timestamp]: Content
+        r'^(?P<author>.*?) \[(?P<timestamp>.*?)\]: (?P<content>.*)$',
+        
+        # Simple format: Author: Content
+        r'^(?P<author>.*?): (?P<content>.*)$'
+    ]
+    
+    for pattern in other_patterns:
+        match = re.match(pattern, line)
+        if match:
+            parts.update(match.groupdict())
+            return parts
+    
+    # No pattern matched, return the original line as content
+    return parts
+
+def extract_messages_from_html(file_path: Path) -> List[Dict[str, Any]]:
+    """
+    Extract messages from a WhatsApp HTML export.
+    
+    Args:
+        file_path: Path to the HTML chat file
+        
+    Returns:
+        List of message dictionaries
+    """
+    try:
+        messages = []
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        # WhatsApp HTML export format
+        msg_divs = soup.find_all('div', class_='message')
+        if msg_divs:
+            logger.info(f"Found {len(msg_divs)} WhatsApp message divs in HTML file")
+            
+            for msg_div in msg_divs:
+                try:
+                    # Extract the message info
+                    header = msg_div.find('div', class_='message-header')
+                    if not header:
+                        continue
+                    
+                    # Extract author and timestamp
+                    author = header.find('span', class_='message-author')
+                    author = author.text.strip() if author else "Unknown"
+                    
+                    timestamp = header.find('span', class_='message-timestamp')
+                    timestamp = timestamp.text.strip() if timestamp else ""
+                    
+                    # Extract message content
+                    content_div = msg_div.find('div', class_='message-content')
+                    content = content_div.text.strip() if content_div else ""
+                    
+                    # Create message dictionary
+                    raw_msg = f"[{timestamp}] {author}: {content}"
+                    message = {
+                        "raw": raw_msg,
+                        "author": author,
+                        "message": content,
+                        "timestamp": timestamp
+                    }
+                    
+                    messages.append(message)
+                    
+                except Exception as e:
+                    logger.warning(f"Error parsing message div: {e}")
+        
+        # If we couldn't find any messages with the WhatsApp format, try a more generic approach
+        if not messages:
+            # Generic approach: find any message-like patterns in the HTML
+            logger.info("No WhatsApp format messages found, trying generic HTML parsing")
+            
+            # Remove scripts and styles to avoid parsing their content
+            for script in soup(["script", "style"]):
+                script.extract()
+                
+            # Get text content
+            text_content = soup.get_text(separator="\n")
+            
+            # Try to extract messages using regex patterns
+            lines = text_content.split("\n")
+            for line in lines:
+                line = line.strip()
+                if line and ":" in line:  # Basic check for a message-like line
+                    parts = extract_message_parts(line)
+                    
+                    if parts["author"]:  # Only include if we could extract an author
+                        message = {
+                            "raw": line,
+                            "author": parts["author"],
+                            "message": parts["content"],
+                            "timestamp": parts["timestamp"]
+                        }
+                        messages.append(message)
+        
+        logger.info(f"Extracted {len(messages)} messages from HTML file")
+        return messages
+        
+    except Exception as e:
+        logger.error(f"Error extracting messages from HTML: {e}")
+        raise
+
+def extract_messages_from_text(file_path: Path) -> List[Dict[str, Any]]:
+    """
+    Extract messages from a plain text chat file.
+    
+    Args:
+        file_path: Path to the text chat file
         
     Returns:
         List of message dictionaries
@@ -28,6 +168,9 @@ def extract_messages(file_path: Path) -> List[Dict[str, Any]]:
         patterns = [
             # WhatsApp pattern: "[DATE, TIME] AUTHOR: MESSAGE"
             r'\[(?P<date>.*?), (?P<time>.*?)\] (?P<author>.*?): (?P<message>.*?)(?=\n\[|$)',
+            
+            # WhatsApp pattern: "DATE, TIME - AUTHOR: MESSAGE"
+            r'(?P<date>\d{2}/\d{2}/\d{4}|\d{2}\.\d{2}\.\d{4}), (?P<time>\d{2}:\d{2}) - (?P<author>.*?): (?P<message>.*?)(?=\n\d{2}[/\.]\d{2}|$)',
             
             # Discord pattern: "AUTHOR [DATE TIME] MESSAGE"
             r'(?P<author>.*?) \[(?P<date>.*?) (?P<time>.*?)\] (?P<message>.*?)(?=\n\w|$)',
@@ -65,33 +208,62 @@ def extract_messages(file_path: Path) -> List[Dict[str, Any]]:
             lines = content.split("\n")
             
             for line in lines:
-                if ":" in line:
-                    # Very simple extraction
-                    parts = line.split(":", 1)
-                    if len(parts) == 2:
-                        author = parts[0].strip()
-                        message_text = parts[1].strip()
-                        
+                line = line.strip()
+                if line and ":" in line:  # Basic check for a message-like line
+                    parts = extract_message_parts(line)
+                    
+                    if parts["author"]:  # Only include if we could extract an author
                         message = {
                             "raw": line,
-                            "author": author,
-                            "message": message_text,
-                            "timestamp": ""
+                            "author": parts["author"],
+                            "message": parts["content"],
+                            "timestamp": parts["timestamp"]
                         }
-                        
                         messages.append(message)
         
         if not messages:
             logger.error("Failed to extract any messages from the chat file.")
             raise ValueError("Could not parse chat format")
             
-        logger.info(f"Extracted {len(messages)} messages from the chat file.")
+        logger.info(f"Extracted {len(messages)} messages from the text file.")
         return messages
         
     except Exception as e:
-        logger.error(f"Error extracting messages: {e}")
+        logger.error(f"Error extracting messages from text: {e}")
         raise
 
+def extract_messages(file_path: Path) -> List[Dict[str, Any]]:
+    """
+    Extract messages from a chat file (text or HTML).
+    
+    Args:
+        file_path: Path to the chat file
+        
+    Returns:
+        List of message dictionaries
+    """
+    # Determine file type based on extension
+    file_extension = file_path.suffix.lower()
+    
+    if file_extension == '.html' or file_extension == '.htm':
+        logger.info(f"Processing HTML file: {file_path}")
+        return extract_messages_from_html(file_path)
+    else:
+        logger.info(f"Processing plain text file: {file_path}")
+        return extract_messages_from_text(file_path)
+
+def count_tokens(text: str) -> int:
+    """
+    Very rough estimation of token count.
+    
+    Args:
+        text: Input text
+        
+    Returns:
+        Estimated token count
+    """
+    # Roughly 1.3 tokens per word for English, might be different for other languages
+    return int(len(text.split()) * 1.3)
 
 def split_chat(file_path: Path) -> List[List[Dict[str, Any]]]:
     """
@@ -123,8 +295,8 @@ def split_chat(file_path: Path) -> List[List[Dict[str, Any]]]:
     token_limit = 3000  # Conservative estimate for token limit per chunk
     
     for message in messages:
-        # Very rough token estimation (about 1.3 tokens per word)
-        msg_token_estimate = len(message["raw"].split()) * 1.3
+        # Get token estimate
+        msg_token_estimate = count_tokens(message["raw"])
         
         # If adding this message would exceed token limit, start a new chunk
         if (estimated_tokens + msg_token_estimate > token_limit or 

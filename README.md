@@ -5,10 +5,20 @@ A Telegram bot that analyzes chat files and generates psychological reports usin
 ## Features
 
 - Analyzes chat files uploaded via Telegram
+- Supports both plaintext (.txt) and WhatsApp HTML exports (.html)
 - Generates detailed psychological reports based on chat content
 - Uses theories from Gabor Maté, John Gottman, Marshall Rosenberg, and Eric Berne
 - Provides visualizations of communication patterns and emotional dynamics
+- Parallelized processing for faster analysis
+- Delivers insights directly in Telegram with HTML formatting
 - Automatically cleans up old files to maintain privacy
+
+## Supported Chat Formats
+
+- WhatsApp text exports (format: `[DD.MM.YYYY, HH:MM] Author: Message`)
+- WhatsApp HTML exports (exported from WhatsApp web/desktop)
+- Standard text chat logs with author and message content
+- Most common chat export formats with timestamps
 
 ## Deployment Options
 
@@ -50,6 +60,7 @@ docker run -p 8080:8080 --env-file .env chat-xray-bot
 - `UPLOAD_RETENTION_HOURS`: Hours to keep uploaded files (default: 1)
 - `REPORT_RETENTION_HOURS`: Hours to keep generated reports (default: 72)
 - `ENABLE_COST_TRACKING`: Enable cost tracking in logs (default: true)
+- `OPENAI_CONCURRENCY_LIMIT`: Maximum number of parallel OpenAI requests (default: 3)
 
 ## License
 

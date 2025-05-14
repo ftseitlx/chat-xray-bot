@@ -18,6 +18,8 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 from aiogram.client.default import DefaultBotProperties
 from aiohttp import web
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+import re
+from bs4 import BeautifulSoup
 
 from app.config import settings
 from app.utils import cleanup
@@ -55,7 +57,7 @@ async def command_start(message: Message):
     await message.answer(
         f"👋 Добро пожаловать в Chat X-Ray Bot, {message.from_user.first_name}!\n\n"
         f"Я могу проанализировать историю вашего общения и предоставить психологический анализ ваших отношений.\n\n"
-        f"Просто отправьте мне файл экспорта чата (в формате .txt, до 2 МБ), и я проведу глубокий анализ для вас.\n\n"
+        f"Просто отправьте мне файл экспорта чата (в формате .txt или .html, до 2 МБ), и я проведу глубокий анализ для вас.\n\n"
         f"Я использую передовые методы психологии, основанные на работах Габора Мате, Джона Готтмана и других исследователей отношений.\n\n"
         f"<b>Команды</b>:\n"
         f"/start - Показать это приветственное сообщение\n"
@@ -81,10 +83,14 @@ async def privacy_command(message: Message):
 async def help_command(message: Message):
     await message.answer(
         "<b>Как использовать Chat X-Ray:</b>\n\n"
-        "1. Экспортируйте историю чата из вашего мессенджера в текстовый файл (.txt)\n"
-        "2. Отправьте текстовый файл этому боту (размер файла должен быть не более 2 МБ)\n"
-        "3. Дождитесь завершения анализа (обычно занимает 1-2 минуты)\n"
-        "4. Получите ссылку на PDF-отчет с психологическими выводами\n\n"
+        "1. Экспортируйте историю чата из вашего мессенджера в текстовый файл (.txt) или HTML-файл (.html)\n"
+        "2. Отправьте файл этому боту (размер файла должен быть не более 2 МБ)\n"
+        "3. Дождитесь завершения анализа (обычно занимает около минуты благодаря параллельной обработке)\n"
+        "4. Получите краткие выводы прямо в Telegram и ссылку на полный PDF-отчет\n\n"
+        "<b>Поддерживаемые форматы:</b>\n"
+        "• Текстовый экспорт WhatsApp\n"
+        "• HTML-экспорт WhatsApp\n"
+        "• Стандартные текстовые логи чатов\n\n"
         "<b>Примечания:</b>\n"
         "• Ваши загруженные файлы автоматически удаляются через 1 час\n"
         "• Отчеты доступны в течение 72 часов\n"
@@ -115,18 +121,77 @@ class ChatProcessingStates(StatesGroup):
 upload_router = Router()
 
 
+# Function to extract key insights from HTML report for Telegram
+async def extract_insights_for_telegram(html_content: str) -> str:
+    """Extract key insights from HTML report for Telegram message"""
+    # Using BeautifulSoup to parse HTML
+    soup = BeautifulSoup(html_content, 'html.parser')
+    
+    # Initialize a result string with header
+    insights = "<b>🔍 Краткий анализ отношений:</b>\n\n"
+    
+    # Try to get the main insights
+    try:
+        # Extract overview section (first paragraph)
+        overview = soup.find('h2', text=re.compile('Общий обзор', re.IGNORECASE))
+        if overview and overview.find_next('p'):
+            first_paragraph = overview.find_next('p').text.strip()
+            insights += f"<b>Общий обзор:</b> {first_paragraph[:200]}...\n\n"
+        
+        # Extract communication patterns
+        patterns = soup.find('h2', text=re.compile('Паттерны общения', re.IGNORECASE))
+        if patterns and patterns.find_next('p'):
+            pattern_text = patterns.find_next('p').text.strip()
+            insights += f"<b>Паттерны общения:</b> {pattern_text[:200]}...\n\n"
+        
+        # Extract emotional analysis
+        emotions = soup.find('h2', text=re.compile('Анализ эмоций', re.IGNORECASE))
+        if emotions and emotions.find_next('p'):
+            emotion_text = emotions.find_next('p').text.strip()
+            insights += f"<b>Эмоциональный анализ:</b> {emotion_text[:200]}...\n\n"
+        
+        # Extract top recommendations (first 3)
+        recommendations = soup.find('h2', text=re.compile('Рекомендации', re.IGNORECASE))
+        if recommendations:
+            rec_items = recommendations.find_next_siblings('div', class_='recommendation')[:3]
+            if rec_items:
+                insights += "<b>Ключевые рекомендации:</b>\n"
+                for i, rec in enumerate(rec_items, 1):
+                    rec_text = rec.text.strip()
+                    insights += f"{i}. {rec_text[:100]}...\n"
+        
+        # Extract key quotes (first 2)
+        quotes = soup.find_all('div', class_='quote')[:2]
+        if quotes:
+            insights += "\n<b>Ключевые цитаты:</b>\n"
+            for quote in quotes:
+                quote_text = quote.find('p').text.strip()
+                author = quote.find('p', class_='quote-author')
+                if author:
+                    insights += f"• <i>«{quote_text}»</i> — {author.text.strip()}\n"
+                else:
+                    insights += f"• <i>«{quote_text}»</i>\n"
+    
+    except Exception as e:
+        logger.error(f"Error extracting insights: {e}")
+        insights += "Не удалось извлечь подробные выводы. Пожалуйста, обратитесь к полному отчету."
+    
+    return insights
+
+
 @upload_router.message(F.document)
 async def handle_document(message: Message):
-    """Handle document uploads and process valid text files"""
+    """Handle document uploads and process valid text or HTML files"""
     # Check if document exists
     if not message.document:
-        await message.answer("⚠️ Документ не найден. Пожалуйста, отправьте текстовый файл.")
+        await message.answer("⚠️ Документ не найден. Пожалуйста, отправьте текстовый файл или HTML-экспорт чата.")
         return
     
-    # Check MIME type
-    if not message.document.mime_type == "text/plain":
+    # Check MIME type - accept text/plain or text/html
+    valid_mime_types = ["text/plain", "text/html"]
+    if message.document.mime_type not in valid_mime_types:
         await message.answer(
-            "⚠️ Неверный формат файла. Пожалуйста, отправьте только текстовый файл (.txt)."
+            "⚠️ Неверный формат файла. Пожалуйста, отправьте текстовый файл (.txt) или HTML-экспорт чата (.html)."
         )
         return
     
@@ -154,9 +219,12 @@ async def handle_document(message: Message):
         
         # Generate unique IDs for the files
         file_id = str(uuid.uuid4())
-        upload_file_path = settings.UPLOAD_DIR / f"{file_id}.txt"
+        
+        # Set the appropriate file extension based on mime type
+        file_extension = ".html" if message.document.mime_type == "text/html" else ".txt"
+        upload_file_path = settings.UPLOAD_DIR / f"{file_id}{file_extension}"
         report_file_path = settings.REPORT_DIR / f"{file_id}.pdf"
-        html_file_path = settings.REPORT_DIR / f"{file_id}.html"
+        html_file_path = settings.REPORT_DIR / f"{file_id}_report.html"
         
         # Download the file
         await bot.download(
@@ -177,7 +245,7 @@ async def handle_document(message: Message):
             return
         
         # Process chunks with GPT-3.5
-        await status_message.edit_text(f"🔄 Обрабатываю {num_chunks} фрагментов данных чата...")
+        await status_message.edit_text(f"🔄 Обрабатываю {num_chunks} фрагментов данных чата (параллельно)...")
         
         try:
             analysis_results = await process_chunks(chunks)
@@ -202,24 +270,49 @@ async def handle_document(message: Message):
                 approx_cost = (num_chunks * 0.0005) + 0.01  # $0.0005 per chunk for GPT-3.5 + $0.01 for GPT-4 Turbo
                 await log_cost(message.from_user.id, num_chunks, approx_cost)
                 
+                # Extract insights for Telegram message
+                telegram_insights = await extract_insights_for_telegram(html_content)
+                
                 # Send success message with download option
                 
                 # If we're in local mode without a webhook, just send the file directly
                 if not settings.WEBHOOK_HOST:
                     await status_message.delete()
+                    
+                    # First send insights as HTML message
                     await message.answer(
-                        "🎉 Анализ завершен! Вот ваш психологический отчет об отношениях:",
+                        telegram_insights,
+                        parse_mode=ParseMode.HTML
                     )
+                    
+                    # Then send the full report as a document
                     await message.answer_document(
                         FSInputFile(report_file_path),
-                        caption="Ваш отчет Chat X-Ray готов. Этот файл будет доступен в течение 72 часов."
+                        caption="Ваш полный отчет Chat X-Ray готов. Этот файл будет доступен в течение 72 часов."
                     )
                 else:
-                    # In production with webhook, send a link
-                    await status_message.edit_text(
-                        f"🎉 Ваш отчет Chat X-Ray готов!\n\n"
-                        f"<b>Скачать отчет:</b> <a href='{report_url}'>Психологический анализ отношений</a>\n\n"
-                        f"Этот отчет будет доступен в течение 72 часов."
+                    # In production with webhook, send insights and a link
+                    await status_message.delete()
+                    
+                    # First send insights as HTML message
+                    await message.answer(
+                        telegram_insights,
+                        parse_mode=ParseMode.HTML
+                    )
+                    
+                    # Then send the link to full report
+                    download_markup = InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [InlineKeyboardButton(
+                                text="📊 Скачать полный отчет",
+                                url=report_url
+                            )]
+                        ]
+                    )
+                    
+                    await message.answer(
+                        "📋 Для получения полного отчета нажмите на кнопку ниже:",
+                        reply_markup=download_markup
                     )
                 
                 # Add metadata to track file expiration

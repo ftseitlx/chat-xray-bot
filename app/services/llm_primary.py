@@ -2,6 +2,7 @@ import json
 import logging
 import time
 import asyncio
+import os
 from typing import List, Dict, Any
 
 import openai
@@ -154,7 +155,7 @@ async def process_chunk(chunk: List[Dict[str, Any]], max_retries: int = 3) -> Li
 
 async def process_chunks(chunks: List[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
     """
-    Process all chunks of messages and combine the results.
+    Process all chunks of messages in parallel and combine the results.
     
     Args:
         chunks: List of chunks, where each chunk is a list of message dictionaries
@@ -162,18 +163,33 @@ async def process_chunks(chunks: List[List[Dict[str, Any]]]) -> List[Dict[str, A
     Returns:
         List of all processed message dictionaries with analysis
     """
-    results = []
+    # Use concurrency limit from settings
+    concurrency_limit = settings.OPENAI_CONCURRENCY_LIMIT
     
-    # Process chunks with rate limiting
-    for i, chunk in enumerate(chunks):
-        logger.info(f"Processing chunk {i+1}/{len(chunks)}")
-        
-        # Add a small delay between chunk processing to avoid rate limits
-        if i > 0 and i % 5 == 0:
-            logger.info("Taking a short break to avoid rate limits...")
-            await asyncio.sleep(1)
-            
-        chunk_results = await process_chunk(chunk)
-        results.extend(chunk_results)
+    # Use a semaphore to limit concurrent API calls
+    semaphore = asyncio.Semaphore(concurrency_limit)
+    
+    async def process_with_semaphore(i, chunk):
+        """Process a chunk with semaphore to limit concurrency"""
+        async with semaphore:
+            logger.info(f"Processing chunk {i+1}/{len(chunks)}")
+            return await process_chunk(chunk)
+    
+    # Create tasks for all chunks
+    tasks = [process_with_semaphore(i, chunk) for i, chunk in enumerate(chunks)]
+    
+    # Process all chunks in parallel and wait for all results
+    logger.info(f"Processing {len(chunks)} chunks with max concurrency of {concurrency_limit}")
+    chunk_results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Combine results, handling any exceptions that occurred
+    results = []
+    for i, result in enumerate(chunk_results):
+        if isinstance(result, Exception):
+            logger.error(f"Error processing chunk {i+1}: {result}")
+            # Add error placeholders for this chunk
+            results.extend([{"error": str(result), "raw_input": msg["raw"]} for msg in chunks[i]])
+        else:
+            results.extend(result)
     
     return results 
