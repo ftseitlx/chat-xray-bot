@@ -33,6 +33,12 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# Add a distinctive log message to verify this version is running
+logger.info("========================================")
+logger.info("TIMEOUT FIX VERSION 2025-05-14 ACTIVATED")
+logger.info("This version includes fixes for the timeout context manager error")
+logger.info("========================================")
+
 # Initialize Sentry if DSN is provided
 if settings.SENTRY_DSN:
     sentry_sdk.init(
@@ -55,33 +61,52 @@ main_router = Router()
 # Helper function to safely send messages in a task
 async def safe_send_message(message: Message, text: str, **kwargs):
     """Send a message safely in a task to avoid timeout context errors"""
+    logger.info("[TIMEOUT-FIX] safe_send_message called with message: " + text[:20] + "...")
     try:
         # Define a function to be executed in a proper task context
         async def _send():
+            logger.info("[TIMEOUT-FIX] Inside _send task function")
             try:
-                return await message.answer(text, **kwargs)
+                logger.info("[TIMEOUT-FIX] About to call message.answer()")
+                result = await message.answer(text, **kwargs)
+                logger.info("[TIMEOUT-FIX] message.answer() completed successfully")
+                return result
             except Exception as inner_e:
-                logger.error(f"Error in _send task: {inner_e}")
+                logger.error(f"[TIMEOUT-FIX] Error in _send task: {inner_e}")
                 return None
         
         # Execute the sending in a proper task context
-        return await asyncio.create_task(_send())
+        logger.info("[TIMEOUT-FIX] Creating task for _send()")
+        task = asyncio.create_task(_send())
+        logger.info("[TIMEOUT-FIX] Task created, awaiting result")
+        result = await task
+        logger.info("[TIMEOUT-FIX] Task completed successfully")
+        return result
     except Exception as e:
-        logger.error(f"Error creating send message task: {e}")
+        logger.error(f"[TIMEOUT-FIX] Error creating send message task: {e}")
         # Try one more time with a delay
         await asyncio.sleep(0.5)
         try:
             # Create a new task for the retry
+            logger.info("[TIMEOUT-FIX] Retrying with new task after error")
             async def _retry_send():
+                logger.info("[TIMEOUT-FIX] Inside retry _send task")
                 try:
-                    return await message.answer(text, **kwargs)
+                    result = await message.answer(text, **kwargs)
+                    logger.info("[TIMEOUT-FIX] Retry message.answer() completed successfully")
+                    return result
                 except Exception as inner_e:
-                    logger.error(f"Error in retry _send task: {inner_e}")
+                    logger.error(f"[TIMEOUT-FIX] Error in retry _send task: {inner_e}")
                     return None
             
-            return await asyncio.create_task(_retry_send())
+            logger.info("[TIMEOUT-FIX] Creating retry task")
+            task = asyncio.create_task(_retry_send())
+            logger.info("[TIMEOUT-FIX] Retry task created, awaiting result")
+            result = await task
+            logger.info("[TIMEOUT-FIX] Retry task completed successfully")
+            return result
         except Exception as e2:
-            logger.error(f"Second attempt failed: {e2}")
+            logger.error(f"[TIMEOUT-FIX] Second attempt failed: {e2}")
             return None
 
 
@@ -272,21 +297,21 @@ async def safe_edit_message(message: Message, text: str, **kwargs):
 @upload_router.message(F.document)
 async def handle_document(message: Message):
     """Handle document uploads and process valid text or HTML files"""
-    logger.info(f"Received document from user {message.from_user.id}: {getattr(message.document, 'file_name', 'Unknown')}")
+    logger.info(f"[TIMEOUT-FIX] Document handler started for user {message.from_user.id}: {getattr(message.document, 'file_name', 'Unknown')}")
     
     # Check if document exists
     if not message.document:
-        logger.warning(f"Document not found in message from user {message.from_user.id}")
+        logger.warning(f"[TIMEOUT-FIX] Document not found in message from user {message.from_user.id}")
         await safe_send_message(message, "⚠️ Документ не найден. Пожалуйста, отправьте текстовый файл или HTML-экспорт чата.")
         return
     
     # Log document details
-    logger.info(f"Document details: name={message.document.file_name}, size={message.document.file_size}, mime={message.document.mime_type}")
+    logger.info(f"[TIMEOUT-FIX] Document details: name={message.document.file_name}, size={message.document.file_size}, mime={message.document.mime_type}")
     
     # Check MIME type - accept text/plain or text/html
     valid_mime_types = ["text/plain", "text/html"]
     if message.document.mime_type not in valid_mime_types:
-        logger.warning(f"Invalid mime type: {message.document.mime_type} from user {message.from_user.id}")
+        logger.warning(f"[TIMEOUT-FIX] Invalid mime type: {message.document.mime_type} from user {message.from_user.id}")
         await safe_send_message(
             message,
             "⚠️ Неверный формат файла. Пожалуйста, отправьте текстовый файл (.txt) или HTML-экспорт чата (.html)."
@@ -295,7 +320,7 @@ async def handle_document(message: Message):
     
     # Check file size
     if message.document.file_size > settings.MAX_FILE_SIZE:
-        logger.warning(f"File too large: {message.document.file_size} bytes from user {message.from_user.id}")
+        logger.warning(f"[TIMEOUT-FIX] File too large: {message.document.file_size} bytes from user {message.from_user.id}")
         await safe_send_message(
             message,
             f"⚠️ Файл слишком большой. Максимальный размер {settings.MAX_FILE_SIZE // (1024 * 1024)} МБ."
@@ -303,12 +328,13 @@ async def handle_document(message: Message):
         return
     
     # All checks passed, let's download and process the file
-    logger.info(f"File validation passed, proceeding to download and process file from user {message.from_user.id}")
+    logger.info(f"[TIMEOUT-FIX] File validation passed, proceeding to download and process file from user {message.from_user.id}")
     
     try:
-        # Send acknowledgment message
+        # Send acknowledgment message - THIS USED TO FAIL WITH TIMEOUT ERROR
+        logger.info("[TIMEOUT-FIX] About to send acknowledgment message using safe_send_message")
         ack_message = await safe_send_message(message, "✅ Ваш файл получен. Начинаю анализ...")
-        logger.info("Acknowledgment message sent")
+        logger.info("[TIMEOUT-FIX] Acknowledgment message sent successfully")
         
         # Process the file by importing here to avoid circular imports
         from app.services.chunker import split_chat
@@ -601,28 +627,35 @@ async def main():
         async def handle_webhook(request):
             # Return a success response immediately to prevent Telegram timeouts
             # Create a task to process the update in the background
+            logger.info("[TIMEOUT-FIX] Webhook handler received request")
             try:
                 # Start a background task to get the update data without blocking the response
                 async def _process_webhook():
+                    logger.info("[TIMEOUT-FIX] Inside _process_webhook background task")
                     try:
                         # Get the update data from the request
+                        logger.info("[TIMEOUT-FIX] Getting JSON from request")
                         update_data = await request.json()
-                        logger.info(f"Received webhook update: {update_data.get('update_id')}")
+                        logger.info(f"[TIMEOUT-FIX] Received webhook update: {update_data.get('update_id')}")
                         
                         # Process the update in a separate task
+                        logger.info("[TIMEOUT-FIX] Creating task for process_update")
                         asyncio.create_task(process_update(update_data))
+                        logger.info("[TIMEOUT-FIX] Task created for process_update - continuing without waiting")
                     except Exception as inner_e:
-                        logger.error(f"Error processing webhook data: {inner_e}")
+                        logger.error(f"[TIMEOUT-FIX] Error processing webhook data: {inner_e}")
                         if settings.SENTRY_DSN:
                             sentry_sdk.capture_exception(inner_e)
                 
                 # Start the processing task without awaiting it
+                logger.info("[TIMEOUT-FIX] Creating background task for _process_webhook")
                 asyncio.create_task(_process_webhook())
+                logger.info("[TIMEOUT-FIX] Background task created - returning response immediately")
                 
                 # Return success immediately
                 return web.Response(status=200, text='{"ok": true}', content_type='application/json')
             except Exception as e:
-                logger.error(f"Critical error in webhook handler: {e}")
+                logger.error(f"[TIMEOUT-FIX] Critical error in webhook handler: {e}")
                 if settings.SENTRY_DSN:
                     sentry_sdk.capture_exception(e)
                 # Still return success to Telegram to prevent retries
@@ -630,21 +663,28 @@ async def main():
         
         # Function to process updates in a separate task
         async def process_update(update_data):
+            logger.info(f"[TIMEOUT-FIX] Process update started for update ID: {update_data.get('update_id')}")
             try:
                 # Create a new task context for processing the update
                 async def _process():
+                    logger.info("[TIMEOUT-FIX] Inside _process task")
                     try:
                         # Let the dispatcher process the update
+                        logger.info("[TIMEOUT-FIX] Feeding update to dispatcher")
                         await dp.feed_raw_update(bot=bot, update=update_data)
+                        logger.info("[TIMEOUT-FIX] Feed raw update completed")
                     except Exception as inner_e:
-                        logger.error(f"Error in update processing: {inner_e}")
+                        logger.error(f"[TIMEOUT-FIX] Error in update processing: {inner_e}")
                         if settings.SENTRY_DSN:
                             sentry_sdk.capture_exception(inner_e)
                 
                 # Run the processing in a proper task context
-                await asyncio.create_task(_process())
+                logger.info("[TIMEOUT-FIX] Creating task for _process")
+                task_result = await asyncio.create_task(_process())
+                logger.info("[TIMEOUT-FIX] _process task completed")
+                return task_result
             except Exception as e:
-                logger.error(f"Error creating process task: {e}")
+                logger.error(f"[TIMEOUT-FIX] Error creating process task: {e}")
                 if settings.SENTRY_DSN:
                     sentry_sdk.capture_exception(e)
         
