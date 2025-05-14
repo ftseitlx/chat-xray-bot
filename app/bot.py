@@ -56,15 +56,30 @@ main_router = Router()
 async def safe_send_message(message: Message, text: str, **kwargs):
     """Send a message safely in a task to avoid timeout context errors"""
     try:
-        # Create a task to send the message
-        task = asyncio.create_task(message.answer(text, **kwargs))
-        return await task
+        # Define a function to be executed in a proper task context
+        async def _send():
+            try:
+                return await message.answer(text, **kwargs)
+            except Exception as inner_e:
+                logger.error(f"Error in _send task: {inner_e}")
+                return None
+        
+        # Execute the sending in a proper task context
+        return await asyncio.create_task(_send())
     except Exception as e:
-        logger.error(f"Error sending message: {e}")
+        logger.error(f"Error creating send message task: {e}")
         # Try one more time with a delay
         await asyncio.sleep(0.5)
         try:
-            return await message.answer(text, **kwargs)
+            # Create a new task for the retry
+            async def _retry_send():
+                try:
+                    return await message.answer(text, **kwargs)
+                except Exception as inner_e:
+                    logger.error(f"Error in retry _send task: {inner_e}")
+                    return None
+            
+            return await asyncio.create_task(_retry_send())
         except Exception as e2:
             logger.error(f"Second attempt failed: {e2}")
             return None
@@ -225,15 +240,30 @@ async def extract_insights_for_telegram(html_content: str) -> str:
 async def safe_edit_message(message: Message, text: str, **kwargs):
     """Edit a message safely in a task to avoid timeout context errors"""
     try:
-        # Create a task to edit the message
-        task = asyncio.create_task(message.edit_text(text, **kwargs))
-        return await task
+        # Define a function to be executed in a proper task context
+        async def _edit():
+            try:
+                return await message.edit_text(text, **kwargs)
+            except Exception as inner_e:
+                logger.error(f"Error in _edit task: {inner_e}")
+                return None
+        
+        # Execute the editing in a proper task context
+        return await asyncio.create_task(_edit())
     except Exception as e:
-        logger.error(f"Error editing message: {e}")
+        logger.error(f"Error creating edit message task: {e}")
         # Try one more time with a delay
         await asyncio.sleep(0.5)
         try:
-            return await message.edit_text(text, **kwargs)
+            # Create a new task for the retry
+            async def _retry_edit():
+                try:
+                    return await message.edit_text(text, **kwargs)
+                except Exception as inner_e:
+                    logger.error(f"Error in retry _edit task: {inner_e}")
+                    return None
+            
+            return await asyncio.create_task(_retry_edit())
         except Exception as e2:
             logger.error(f"Second edit attempt failed: {e2}")
             return None
@@ -305,15 +335,9 @@ async def handle_document(message: Message):
         # Download the file
         logger.info("Starting file download")
         try:
-            # Create a task for downloading
-            download_task = asyncio.create_task(
-                bot.download(
-                    message.document,
-                    destination=upload_file_path
-                )
-            )
-            await download_task
-            logger.info(f"File downloaded successfully to {upload_file_path}")
+            # Create a proper download task and await it
+            file_path = await bot.download(message.document, destination=upload_file_path)
+            logger.info(f"File downloaded successfully to {file_path}")
             
             # Verify file was downloaded correctly
             if os.path.exists(upload_file_path):
@@ -414,6 +438,10 @@ async def handle_document(message: Message):
                     
                     # Then send the full report as a document
                     logger.info("Sending report document")
+                    await safe_send_message(
+                        message,
+                        "Отправляю полный отчет..."
+                    )
                     await asyncio.create_task(message.answer_document(
                         FSInputFile(report_file_path),
                         caption="Ваш полный отчет Chat X-Ray готов. Этот файл будет доступен в течение 72 часов."
@@ -421,7 +449,7 @@ async def handle_document(message: Message):
                 else:
                     # In production with webhook, send insights and a link
                     logger.info("Running in webhook mode, sending link to report")
-                    await status_message.delete()
+                    await asyncio.create_task(status_message.delete())
                     
                     # First send insights as HTML message
                     logger.info("Sending insights message")
@@ -549,7 +577,11 @@ async def main():
     scheduler.start()
     
     # First, delete any existing webhook to avoid conflicts
-    await bot.delete_webhook(drop_pending_updates=True)
+    try:
+        # Create a task for webhook deletion
+        await asyncio.create_task(bot.delete_webhook(drop_pending_updates=True))
+    except Exception as e:
+        logger.error(f"Error deleting webhook: {e}")
     
     # If webhook URL is provided or we're on Render (PORT env var is set), use webhook mode
     if settings.WEBHOOK_URL or os.environ.get("PORT"):
@@ -567,29 +599,54 @@ async def main():
         
         # Define a custom webhook handler function that properly handles tasks
         async def handle_webhook(request):
+            # Return a success response immediately to prevent Telegram timeouts
+            # Create a task to process the update in the background
             try:
-                # Get the update data from the request
-                update_data = await request.json()
-                logger.info(f"Received webhook update: {update_data.get('update_id')}")
+                # Start a background task to get the update data without blocking the response
+                async def _process_webhook():
+                    try:
+                        # Get the update data from the request
+                        update_data = await request.json()
+                        logger.info(f"Received webhook update: {update_data.get('update_id')}")
+                        
+                        # Process the update in a separate task
+                        asyncio.create_task(process_update(update_data))
+                    except Exception as inner_e:
+                        logger.error(f"Error processing webhook data: {inner_e}")
+                        if settings.SENTRY_DSN:
+                            sentry_sdk.capture_exception(inner_e)
                 
-                # Process the update in a separate task to avoid timeout context issues
-                asyncio.create_task(
-                    process_update(update_data)
-                )
+                # Start the processing task without awaiting it
+                asyncio.create_task(_process_webhook())
                 
-                # Return a success response immediately
-                return web.Response(status=200)
+                # Return success immediately
+                return web.Response(status=200, text='{"ok": true}', content_type='application/json')
             except Exception as e:
-                logger.error(f"Error in webhook handler: {e}")
-                return web.Response(status=500)
+                logger.error(f"Critical error in webhook handler: {e}")
+                if settings.SENTRY_DSN:
+                    sentry_sdk.capture_exception(e)
+                # Still return success to Telegram to prevent retries
+                return web.Response(status=200, text='{"ok": true, "error_logged": true}', content_type='application/json')
         
         # Function to process updates in a separate task
         async def process_update(update_data):
             try:
-                # Let the dispatcher process the update
-                await dp.feed_raw_update(bot=bot, update=update_data)
+                # Create a new task context for processing the update
+                async def _process():
+                    try:
+                        # Let the dispatcher process the update
+                        await dp.feed_raw_update(bot=bot, update=update_data)
+                    except Exception as inner_e:
+                        logger.error(f"Error in update processing: {inner_e}")
+                        if settings.SENTRY_DSN:
+                            sentry_sdk.capture_exception(inner_e)
+                
+                # Run the processing in a proper task context
+                await asyncio.create_task(_process())
             except Exception as e:
-                logger.error(f"Error processing update: {e}")
+                logger.error(f"Error creating process task: {e}")
+                if settings.SENTRY_DSN:
+                    sentry_sdk.capture_exception(e)
         
         # Register the custom webhook handler
         app.router.add_post(settings.WEBHOOK_PATH, handle_webhook)
@@ -601,8 +658,12 @@ async def main():
         app.router.add_static("/reports/", path=str(settings.REPORT_DIR), name="reports")
         
         # Set webhook with drop_pending_updates=True to avoid conflicts
-        await bot.set_webhook(url=settings.WEBHOOK_URL, drop_pending_updates=True)
-        logger.info(f"Webhook set at: {settings.WEBHOOK_URL}")
+        try:
+            # Create a task for setting webhook
+            await asyncio.create_task(bot.set_webhook(url=settings.WEBHOOK_URL, drop_pending_updates=True))
+            logger.info(f"Webhook set at: {settings.WEBHOOK_URL}")
+        except Exception as e:
+            logger.error(f"Error setting webhook: {e}")
         
         # Return the app to be run by the caller
         return app
@@ -613,7 +674,11 @@ async def main():
 
 
 if __name__ == "__main__":
-    # Setup event loop
+    # Setup event loop with proper policy
+    if sys.platform == 'win32':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    
+    # Create a new event loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
@@ -624,8 +689,25 @@ if __name__ == "__main__":
         # If we're in webhook mode, run the web app
         if app:
             web.run_app(app, host=settings.HOST, port=settings.PORT)
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user (Keyboard Interrupt)")
     except Exception as e:
         logger.error(f"Error in main function: {e}")
+        if settings.SENTRY_DSN:
+            sentry_sdk.capture_exception(e)
     finally:
         # Clean up
-        loop.close() 
+        tasks = asyncio.all_tasks(loop)
+        for task in tasks:
+            task.cancel()
+        
+        # Wait for all tasks to be cancelled
+        if tasks:
+            try:
+                loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+            except asyncio.CancelledError:
+                pass
+        
+        # Close the loop
+        loop.close()
+        logger.info("Bot stopped") 

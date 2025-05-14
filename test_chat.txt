@@ -1,0 +1,8 @@
+Alice: Hi Bob, how are you today?
+Bob: I'm good, thanks for asking! How about you?
+Alice: I'm doing well too. I was wondering if you'd like to grab coffee sometime this week?
+Bob: That sounds great! How about Wednesday afternoon?
+Alice: Wednesday works for me. Let's meet at that new café downtown.
+Bob: Perfect! Looking forward to it.
+Alice: Me too! See you then.
+Bob: See you on Wednesday! 

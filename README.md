@@ -1,71 +1,114 @@
 # Chat X-Ray Bot
 
-A Telegram bot that analyzes chat files and generates psychological reports using OpenAI's GPT models.
+A Telegram bot that analyzes chat history to provide psychological insights about relationships.
 
 ## Features
 
-- Analyzes chat files uploaded via Telegram
-- Supports both plaintext (.txt) and WhatsApp HTML exports (.html)
-- Generates detailed psychological reports based on chat content
-- Uses theories from Gabor Maté, John Gottman, Marshall Rosenberg, and Eric Berne
-- Provides visualizations of communication patterns and emotional dynamics
-- Parallelized processing for faster analysis
-- Delivers insights directly in Telegram with HTML formatting
-- Automatically cleans up old files to maintain privacy
+- Upload chat export files (.txt or .html) for analysis
+- Get AI-powered psychological insights about communication patterns
+- Receive a detailed PDF report with visualizations
+- Analysis based on psychological theories including Gabor Maté's attachment theory, John Gottman's four horsemen, and more
 
-## Supported Chat Formats
+## Technical Stack
 
-- WhatsApp text exports (format: `[DD.MM.YYYY, HH:MM] Author: Message`)
-- WhatsApp HTML exports (exported from WhatsApp web/desktop)
-- Standard text chat logs with author and message content
-- Most common chat export formats with timestamps
+- Python 3.12+
+- aiogram 3.x for Telegram bot API
+- OpenAI API (GPT-3.5 Turbo & GPT-4 Turbo) for chat analysis
+- aiohttp for asynchronous web server
+- Beautiful Soup for HTML parsing
+- Deployed on Render.com
 
-## Deployment Options
+## Installation
 
-### Local Development
-
-1. Clone the repository
-2. Create a virtual environment: `python -m venv venv`
-3. Activate the virtual environment: 
-   - Windows: `venv\Scripts\activate`
-   - macOS/Linux: `source venv/bin/activate`
-4. Install dependencies: `pip install -e .`
-5. Copy `.env.example` to `.env` and fill in your API keys
-6. Run the bot: `python -m app.bot`
-
-### Docker Deployment
-
+1. Clone this repository
 ```bash
-docker build -t chat-xray-bot .
-docker run -p 8080:8080 --env-file .env chat-xray-bot
+git clone https://github.com/yourusername/chat-xray-bot.git
+cd chat-xray-bot
 ```
 
-### Render.com Deployment (Free)
+2. Create a virtual environment and install dependencies
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
 
-1. Fork this repository to your GitHub account
-2. Create a new Web Service on Render.com
-3. Connect your GitHub repository
-4. Select "Docker" as the environment
-5. Add the required environment variables (BOT_TOKEN, OPENAI_API_KEY)
-6. Deploy!
+3. Create a `.env` file with your configuration
+```
+BOT_TOKEN=your_telegram_bot_token
+OPENAI_API_KEY=your_openai_api_key
+WEBHOOK_HOST=your_webhook_host  # Optional for production
+SENTRY_DSN=your_sentry_dsn  # Optional for error tracking
+```
 
-## Environment Variables
+4. Run the bot locally
+```bash
+python -m app.bot
+```
 
-- `BOT_TOKEN`: Your Telegram bot token from BotFather
-- `OPENAI_API_KEY`: Your OpenAI API key
-- `WEBHOOK_HOST`: URL of your deployed application (for production)
-- `WEBHOOK_PATH`: Path for the webhook endpoint (default: /webhook)
-- `PORT`: Port to run the server on (default: 8080)
-- `HOST`: Host to bind the server to (default: 0.0.0.0)
-- `UPLOAD_RETENTION_HOURS`: Hours to keep uploaded files (default: 1)
-- `REPORT_RETENTION_HOURS`: Hours to keep generated reports (default: 72)
-- `ENABLE_COST_TRACKING`: Enable cost tracking in logs (default: true)
-- `OPENAI_CONCURRENCY_LIMIT`: Maximum number of parallel OpenAI requests (default: 3)
+## Deployment
+
+The bot can be deployed to Render.com or another hosting service that supports Python applications.
+
+### Using the Fix and Redeploy Script
+
+For webhook-based deployments, use the provided script:
+
+```bash
+# Create a backup and fix webhook configuration
+python fix_and_redeploy.py --webhook
+
+# Create a backup, trigger a Render deployment, and fix webhook configuration
+python fix_and_redeploy.py --webhook --render-deploy
+
+# Restart the local bot service
+python fix_and_redeploy.py --restart
+```
+
+## Timeout Context Manager Fix
+
+This repository includes a fix for the "Timeout context manager should be used inside a task" error that can occur with aiogram 3.x and aiohttp. The error happens when timeout context managers are used outside of proper asyncio tasks.
+
+### Key Improvements:
+
+1. **Enhanced Helper Functions**:
+   - `safe_send_message` and `safe_edit_message` now properly handle async task contexts
+   - Added nested task functions with comprehensive error handling
+   - Implemented retry mechanisms for failed operations
+
+2. **Webhook Handler Optimization**:
+   - Completely rewritten to respond immediately to Telegram while processing updates in the background
+   - Implemented a two-level task structure for request handling
+   - Added proper error recovery to prevent cascading failures
+
+3. **Task Management**: 
+   - Fixed task cleanup during shutdown
+   - Proper task context for all async operations
+   - Improved exception handling throughout the codebase
+
+For more details, see [README_TIMEOUT_FIX.md](README_TIMEOUT_FIX.md).
+
+## Folder Structure
+
+- `app/`: Main application code
+  - `bot.py`: Main bot implementation
+  - `config.py`: Configuration settings
+  - `services/`: Service modules for chat processing
+  - `utils/`: Utility functions
+- `docs/`: Documentation files
+- `uploads/`: Temporary storage for uploaded chat files
+- `reports/`: Generated PDF reports
+
+## Privacy and Data Handling
+
+- All chat data is anonymized during processing
+- Uploaded files are automatically deleted after 1 hour
+- Reports are accessible for 72 hours before deletion
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License
 
-## Privacy Policy
+## Credits
 
-See the [Privacy Policy](docs/privacy_policy.md) for information on how user data is handled. 
+Developed by [Your Name/Company] 
