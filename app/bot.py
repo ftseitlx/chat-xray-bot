@@ -415,8 +415,17 @@ async def main():
     # Start the scheduler
     scheduler.start()
     
-    # If webhook URL is provided, use webhook mode
-    if settings.WEBHOOK_URL:
+    # First, delete any existing webhook to avoid conflicts
+    await bot.delete_webhook()
+    
+    # If webhook URL is provided or we're on Render (PORT env var is set), use webhook mode
+    if settings.WEBHOOK_URL or os.environ.get("PORT"):
+        # If WEBHOOK_URL is not set but we're on Render, construct it
+        if not settings.WEBHOOK_URL and os.environ.get("RENDER_EXTERNAL_URL"):
+            webhook_host = os.environ.get("RENDER_EXTERNAL_URL")
+            settings.WEBHOOK_URL = f"{webhook_host}{settings.WEBHOOK_PATH}"
+            logger.info(f"Running on Render.com, constructed webhook URL: {settings.WEBHOOK_URL}")
+            
         logger.info(f"Starting in webhook mode with URL: {settings.WEBHOOK_URL}")
         logger.info(f"Web server will listen on {settings.HOST}:{settings.PORT}")
         
@@ -447,9 +456,8 @@ async def main():
         logger.info("Starting web application")
         web.run_app(app, host=settings.HOST, port=settings.PORT)
     else:
-        # Use polling mode
-        logger.info("Starting in polling mode as WEBHOOK_URL is not set")
-        await bot.delete_webhook()
+        # Use polling mode only for local development
+        logger.info("Starting in polling mode as WEBHOOK_URL is not set and not running on Render")
         await dp.start_polling(bot)
 
 

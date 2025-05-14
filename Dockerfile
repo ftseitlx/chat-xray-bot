@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y \
     libffi-dev \
     shared-mime-info \
     wkhtmltopdf \
+    curl \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -39,14 +40,36 @@ RUN pip install -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create directories for uploads and reports
-RUN mkdir -p uploads reports
+# Create directories for uploads and reports and ensure proper permissions
+RUN mkdir -p uploads reports && chmod 777 uploads reports
+
+# Create a startup script
+RUN echo '#!/bin/bash\n\
+echo "Starting Chat X-Ray Bot..."\n\
+echo "Python version: $(python --version)"\n\
+echo "Checking directories:"\n\
+ls -la /app\n\
+echo "Uploads directory:"\n\
+ls -la /app/uploads\n\
+echo "Reports directory:"\n\
+ls -la /app/reports\n\
+echo "Checking key environment variables:"\n\
+echo "BOT_TOKEN set: $(if [ -n "$BOT_TOKEN" ]; then echo YES; else echo NO; fi)"\n\
+echo "OPENAI_API_KEY set: $(if [ -n "$OPENAI_API_KEY" ]; then echo YES; else echo NO; fi)"\n\
+echo "WEBHOOK_HOST set: $(if [ -n "$WEBHOOK_HOST" ]; then echo YES; else echo NO; fi)"\n\
+echo "PORT set: $(if [ -n "$PORT" ]; then echo YES - $PORT; else echo NO; fi)"\n\
+echo "RENDER_EXTERNAL_URL set: $(if [ -n "$RENDER_EXTERNAL_URL" ]; then echo YES - $RENDER_EXTERNAL_URL; else echo NO; fi)"\n\
+echo "Starting bot in webhook mode, binding to port ${PORT:-8080}..."\n\
+# Make sure we use the right port\n\
+export PORT=${PORT:-8080}\n\
+# Starting the application\n\
+exec python -m app.bot\n' > /app/start.sh && chmod +x /app/start.sh
 
 # Expose the port that the application uses
 EXPOSE 8080
 
-# Start the bot
-CMD ["python", "-m", "app.bot"]
+# Start the bot using the startup script
+CMD ["/app/start.sh"]
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
