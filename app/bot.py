@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import sys
+import os
 from datetime import datetime
 
 import sentry_sdk
@@ -211,7 +212,6 @@ async def handle_document(message: Message):
         from app.services.llm_meta import generate_meta_report
         from app.services.render import render_to_pdf
         from app.utils.logging_utils import log_cost
-        import os
         import uuid
         from pathlib import Path
         import openai
