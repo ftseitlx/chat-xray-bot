@@ -1,0 +1,479 @@
+import json
+import logging
+import time
+from typing import List, Dict, Any
+
+import openai
+from openai import AsyncOpenAI
+
+from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+# Initialize the OpenAI client
+client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+
+# Meta-analysis prompt
+META_PROMPT = """
+Вы эксперт-психолог и терапевт отношений, специализирующийся на работах Габора Мате, Джона Готтмана, Маршалла Розенберга и Эрика Берна.
+
+Я предоставлю вам данные в формате JSON, извлеченные из сообщений чата, которые содержат:
+- автор
+- временная_метка
+- анализ_настроения (sentiment)
+- оценка_токсичности (toxicity, 0-1)
+- оценка_манипуляции (manipulation, 0-1)
+- стиль_привязанности (attachment_style)
+- паттерны_общения (communication_pattern)
+- четыре_всадника_готтмана (gottman_horsemen)
+- трансакционное_состояние (transactional_state)
+- психологические_потребности
+- ключевые_цитаты (key_quotes)
+
+На основе этих данных создайте ПОДРОБНЫЙ и ГЛУБОКИЙ психологический отчет в формате HTML ПОЛНОСТЬЮ НА РУССКОМ ЯЗЫКЕ. Отчет должен быть исключительно детальным, с большим количеством цитат и проницательным анализом:
+
+1. **Общий обзор** (минимум 600 слов): 
+   - Подробная оценка динамики отношений с обширными примерами
+   - Глубокий анализ с точки зрения теории привязанности Габора Мате
+   - Оценка стабильности отношений во времени
+   - Анализ баланса власти и взаимозависимости
+
+2. **Паттерны общения** (минимум 500 слов):
+   - Детальный анализ здоровых и проблемных паттернов с МИНИМУМ 5 конкретными примерами цитат
+   - Подробный разбор присутствия каждого из Четырех Всадников Готтмана с конкретными цитатами и частотой их появления
+   - Анализ соотношения позитивных к негативным взаимодействиям (Принцип Готтмана 5:1)
+   - Оценка эмоциональной безопасности в коммуникации
+
+3. **Анализ эмоций** (минимум 500 слов):
+   - Подробное отслеживание эмоциональных колебаний с точными цитатами
+   - Анализ эмоциональных триггеров каждого участника с конкретными примерами
+   - Выявление ран привязанности по Габору Мате с глубоким анализом их происхождения
+   - Детальный разбор эмоциональной регуляции и созависимости
+
+4. **Токсичные взаимодействия** (минимум 300 слов):
+   - Подробный анализ всех манипулятивных тактик с МИНИМУМ 4 конкретными примерами
+   - Детальное описание нарушений границ с цитатами
+   - Выявление потенциальных паттернов газлайтинга, обесценивания или других форм эмоционального насилия с примерами
+   - Оценка уровня токсичности отношений в целом с конкретными доказательствами
+
+5. **Ключевые цитаты** (минимум 15 цитат):
+   - МИНИМУМ 15 наиболее значимых цитат из разговора, демонстрирующих ключевые аспекты отношений
+   - Каждая цитата должна сопровождаться глубоким психологическим анализом (минимум 50 слов на каждую)
+   - Распределение цитат должно быть равномерным между всеми участниками беседы
+   - ВАЖНО: Если в данных есть поле с дополнительными цитатами, ОБЯЗАТЕЛЬНО включите их в этот раздел
+   - Для каждой цитаты указывайте автора, эмоцию и стиль коммуникации
+   - Оформляйте цитаты в отдельных блоках с классом "quote" для лучшей визуализации
+
+6. **Психологические инсайты** (минимум 600 слов):
+   - Глубокий анализ на основе Трансакционного анализа с подробным разбором эго-состояний и их взаимодействия
+   - Детальный анализ стилей привязанности каждого участника с конкретными примерами их проявления
+   - Выявление психологических защитных механизмов и их влияния на отношения
+   - Анализ глубинных потребностей и мотивов поведения, не выраженных напрямую
+
+7. **Рекомендации** (минимум 10 рекомендаций):
+   - МИНИМУМ 10 конкретных, практических рекомендаций по улучшению отношений
+   - Детальное объяснение каждой рекомендации (минимум 100 слов на каждую)
+   - Конкретные упражнения и техники для применения в повседневной жизни
+   - Специфические рекомендации для каждого участника отдельно
+
+8. **Количественный анализ** (новый раздел):
+   - Подробное описание всех количественных показателей, выявленных в анализе
+   - Процентное соотношение различных паттернов коммуникации
+   - Динамика изменения эмоционального фона с течением времени
+   - Сравнительный анализ участников по психологическим метрикам
+
+## ГРАФИЧЕСКАЯ ВИЗУАЛИЗАЦИЯ (улучшенная и расширенная):
+
+1. **График временной шкалы настроений**:
+   - Создайте ДЕТАЛЬНЫЙ интерактивный график, показывающий эмоциональные колебания каждого участника с течением времени
+   - Используйте реальные количественные данные из анализа
+   - Включите маркеры ключевых моментов с подписями
+   - Используйте HTML/CSS для создания графика с градиентной цветовой схемой
+
+2. **Лепестковая диаграмма коммуникационных метрик**:
+   - Создайте для КАЖДОГО участника лепестковую диаграмму, отображающую следующие метрики:
+     - Токсичность (средний показатель)
+     - Манипулятивность (средний показатель)
+     - Позитивность (процентное соотношение)
+     - Ассертивность (процентное соотношение)
+     - Эмпатия (рассчитанный показатель)
+     - Эмоциональная регуляция (рассчитанный показатель)
+   - Используйте точные количественные показатели из анализа данных
+
+3. **Гистограммы распределения коммуникационных паттернов**:
+   - Создайте детальную гистограмму для каждого участника, показывающую распределение стилей коммуникации
+   - Включите процентные соотношения и абсолютные значения
+   - Добавьте сравнительный график между участниками
+
+4. **Тепловая карта эмоциональной динамики**:
+   - Создайте тепловую карту на основе сентимент-анализа всего разговора
+   - Визуализируйте эмоциональную интенсивность в разные периоды беседы
+   - Используйте градиентную цветовую шкалу для отображения интенсивности эмоций
+
+5. **График присутствия "Четырех Всадников" Готтмана**:
+   - Визуализируйте частоту появления каждого из "Четырех Всадников" на протяжении разговора
+   - Создайте сравнительную диаграмму между участниками
+   - Включите индикатор общего риска для отношений на основе методики Готтмана
+
+6. **Диаграмма Санкей трансакционных взаимодействий**:
+   - Создайте диаграмму Санкей, отображающую потоки взаимодействий между эго-состояниями
+   - Визуализируйте, как часто встречаются различные комбинации взаимодействий (Родитель-Ребенок, Взрослый-Взрослый и т.д.)
+   - Используйте ширину потоков для отображения частоты взаимодействий
+
+7. **График динамики психологических потребностей**:
+   - Визуализируйте, как меняются выраженные психологические потребности с течением диалога
+   - Отметьте удовлетворенные и неудовлетворенные потребности разными цветами
+   - Включите метрики выражения потребностей для каждого участника
+
+## РЕКОМЕНДАЦИИ ПО СТИЛЮ:
+
+1. Используйте профессиональный, чистый дизайн с успокаивающей цветовой схемой.
+2. Включите ВСЕ перечисленные выше графики и визуальные элементы, используя встроенный в HTML JavaScript и CSS.
+3. Используйте адекватные размеры шрифта, отступы и поля для удобочитаемости.
+4. HTML должен быть полностью автономным со встроенным CSS и JavaScript (без внешних зависимостей).
+5. ОБЯЗАТЕЛЬНО реализуйте графики и диаграммы, используя встроенный SVG и CSS.
+6. Сделайте отчет похожим на профессиональный психологический анализ высшего уровня.
+7. Включите заголовок с названием "Chat X-Ray: Подробный психологический анализ отношений" и текущей датой.
+8. Для раздела "Ключевые цитаты" используйте следующий HTML шаблон для каждой цитаты:
+   ```html
+   <div class="quote">
+     <p>"Текст цитаты здесь"</p>
+     <p class="quote-author">Автор цитаты</p>
+     <p class="quote-emotion">Эмоция: [эмоция] | Стиль общения: [стиль]</p>
+     <p>Психологический анализ: [ваш анализ цитаты]</p>
+   </div>
+   ```
+
+## КЛЮЧЕВЫЕ ТРЕБОВАНИЯ:
+1. ОБЯЗАТЕЛЬНО ПИШИТЕ ВЕСЬ ТЕКСТ ОТЧЕТА НА РУССКОМ ЯЗЫКЕ БЕЗ ИСКЛЮЧЕНИЙ.
+2. Используйте ТОЧНЫЕ количественные показатели из данных для создания всех графиков и диаграмм.
+3. Включите МИНИМУМ 15 содержательных цитат с подробным анализом.
+4. Сделайте отчет МАКСИМАЛЬНО ГЛУБОКИМ и ПРОНИЦАТЕЛЬНЫМ, как если бы его подготовил ведущий эксперт в психологии отношений.
+5. ВСЕ ГРАФИКИ ДОЛЖНЫ БЫТЬ СОЗДАНЫ на основе РЕАЛЬНЫХ ДАННЫХ анализа.
+6. ОБЯЗАТЕЛЬНО включите ВСЕ цитаты, которые были предоставлены в дополнительных данных, даже если они отсутствуют в основной выборке.
+
+Ваш вывод должен быть ТОЛЬКО допустимым HTML (со встроенным CSS и JavaScript), который можно напрямую преобразовать в PDF.
+"""
+
+
+async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int = 3) -> str:
+    """
+    Generate a meta report from the analysis results using GPT-4 Turbo.
+    
+    Args:
+        results: List of analyzed message dictionaries
+        max_retries: Maximum number of retries on rate limit errors
+        
+    Returns:
+        HTML string for the report
+    """
+    # We're using GPT-4 Turbo which has a 128K token context window,
+    # so we can handle much larger inputs, but still do some sampling for very large chats
+    if len(results) > 1000:
+        # Take a sample to reduce token count for extremely large chats
+        logger.info(f"Very large result set ({len(results)} messages). Sampling for meta-analysis.")
+        
+        # Intelligent sampling - keep first, last and some middle parts
+        sampled_results = []
+        
+        # Keep first 200 messages
+        sampled_results.extend(results[:200])
+        
+        # Keep middle 300 messages (if available)
+        middle_start = max(200, len(results) // 2 - 150)
+        middle_end = min(middle_start + 300, len(results))
+        sampled_results.extend(results[middle_start:middle_end])
+        
+        # Keep last 200 messages
+        sampled_results.extend(results[-200:])
+        
+        # Use sampled results instead
+        results_to_process = sampled_results
+        logger.info(f"Sampled down to {len(results_to_process)} messages for meta-analysis")
+    else:
+        # GPT-4 Turbo can handle up to 1000 messages easily
+        results_to_process = results
+    
+    # Convert results to a JSON string
+    results_json = json.dumps(results_to_process, indent=2)
+    
+    retry_count = 0
+    backoff_time = settings.RETRY_DELAY_SECONDS  # Start with configured delay
+    
+    while retry_count <= max_retries:
+        try:
+            # Call the OpenAI API with GPT-4 Turbo
+            response = await client.chat.completions.create(
+                model=settings.META_MODEL,
+                messages=[
+                    {"role": "system", "content": META_PROMPT},
+                    {"role": "user", "content": f"Создайте психологический отчет на РУССКОМ языке на основе предоставленных данных:\n\n{results_json}"}
+                ],
+                temperature=0.7,
+                max_tokens=4000,  # GPT-4 Turbo allows for larger response sizes
+                n=1
+            )
+            
+            # Extract the response content
+            html_content = response.choices[0].message.content
+            
+            # Basic validation - check if it looks like HTML
+            if not html_content.strip().startswith("<!DOCTYPE html>") and not html_content.strip().startswith("<html"):
+                # Try to extract HTML if the model included other text
+                import re
+                html_match = re.search(r'(<html.*?>.*?</html>)', html_content, re.DOTALL)
+                if html_match:
+                    html_content = html_match.group(1)
+                else:
+                    # Wrap the content in basic HTML if needed
+                    html_content = f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta charset="UTF-8">
+                        <title>Chat X-Ray: Психологический анализ отношений</title>
+                        <style>
+                            body {{ font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }}
+                            h1 {{ color: #2c3e50; text-align: center; margin-bottom: 30px; }}
+                            h2 {{ color: #3498db; margin-top: 30px; border-bottom: 1px solid #eee; padding-bottom: 10px; }}
+                            .section {{ margin-bottom: 30px; }}
+                            .quote {{ font-style: italic; border-left: 3px solid #3498db; padding: 15px; margin: 15px 0; background-color: #f8f9fa; }}
+                            .quote-author {{ font-weight: bold; margin-top: 5px; color: #555; }}
+                            .quote-emotion {{ color: #777; font-size: 0.9em; margin-top: 5px; }}
+                            .recommendation {{ background-color: #f0f7fb; padding: 15px; border-radius: 5px; margin-bottom: 10px; border-left: 5px solid #3498db; }}
+                            .chart {{ background-color: #f5f5f5; padding: 10px; border-radius: 5px; margin: 20px 0; height: 300px; display: flex; justify-content: center; align-items: center; }}
+                            .chart-placeholder {{ color: #777; font-style: italic; }}
+                            .positive {{ color: #27ae60; }}
+                            .negative {{ color: #e74c3c; }}
+                            .neutral {{ color: #7f8c8d; }}
+                            table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
+                            th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }}
+                            th {{ background-color: #f2f2f2; }}
+                        </style>
+                    </head>
+                    <body>
+                        <h1>Chat X-Ray: Психологический анализ отношений</h1>
+                        
+                        <div class="section">
+                            <h2>Общий обзор</h2>
+                            <p>Данный отчет содержит психологический анализ предоставленного чата, основываясь на теориях Габора Мате, Джона Готтмана и других психологов.</p>
+                            {html_content}
+                        </div>
+                        
+                        <div class="section">
+                            <h2>Паттерны общения</h2>
+                            <p>В данном разделе представлен анализ основных паттернов общения между участниками беседы.</p>
+                            <div class="chart">
+                                <p class="chart-placeholder">Здесь будет отображаться график коммуникационных паттернов.</p>
+                            </div>
+                        </div>
+                        
+                        <div class="section">
+                            <h2>Анализ эмоций</h2>
+                            <p>Анализ эмоционального фона беседы и динамики эмоций участников.</p>
+                            <div class="chart">
+                                <p class="chart-placeholder">Здесь будет отображаться график эмоционального состояния.</p>
+                            </div>
+                        </div>
+                        
+                        <div class="section">
+                            <h2>Ключевые цитаты</h2>
+                            <p>Наиболее значимые цитаты из беседы с психологическим анализом:</p>
+                            <div class="quote">
+                                <p>"Пример цитаты из беседы, которая демонстрирует важный психологический аспект отношений."</p>
+                                <p class="quote-author">Автор цитаты</p>
+                                <p class="quote-emotion">Эмоция: радость | Стиль общения: ассертивный</p>
+                                <p>Психологический анализ: Данная цитата демонстрирует открытость в общении и стремление к установлению эмоциональной связи.</p>
+                            </div>
+                            <div class="quote">
+                                <p>"Еще один пример значимой цитаты из беседы."</p>
+                                <p class="quote-author">Другой участник</p>
+                                <p class="quote-emotion">Эмоция: грусть | Стиль общения: пассивный</p>
+                                <p>Психологический анализ: В этой цитате проявляется неуверенность и страх отвержения, характерные для тревожного стиля привязанности.</p>
+                            </div>
+                        </div>
+                        
+                        <div class="section">
+                            <h2>Психологические инсайты</h2>
+                            <p>Психологические наблюдения на основе трансакционного анализа и теории привязанности.</p>
+                        </div>
+                        
+                        <div class="section">
+                            <h2>Рекомендации</h2>
+                            <div class="recommendation">
+                                <p>Рекомендация 1: Улучшить коммуникацию и практиковать активное слушание, чтобы лучше понимать потребности друг друга.</p>
+                            </div>
+                            <div class="recommendation">
+                                <p>Рекомендация 2: Обратить внимание на эмоциональные триггеры и практиковать осознанность в моменты напряжения.</p>
+                            </div>
+                            <div class="recommendation">
+                                <p>Рекомендация 3: Использовать технику "Я-сообщений" вместо обвинений для выражения своих чувств и потребностей.</p>
+                            </div>
+                            <div class="recommendation">
+                                <p>Рекомендация 4: Выделять специальное время для обсуждения важных вопросов, избегая спонтанных серьезных разговоров в неподходящее время.</p>
+                            </div>
+                            <div class="recommendation">
+                                <p>Рекомендация 5: Регулярно выражать признательность и благодарность друг другу, укрепляя позитивную связь.</p>
+                            </div>
+                        </div>
+                    </body>
+                    </html>
+                    """
+            
+            # Add disclaimer about sampling if applicable
+            if len(results) > 1000:
+                # Add a note about sampling at the top of the report
+                import re
+                
+                # Try to find where to insert our sampling notice
+                body_pattern = r'<body[^>]*>'
+                if re.search(body_pattern, html_content):
+                    # Insert after the body tag
+                    sampling_notice = f"""
+                    <div style="background-color: #fff3cd; padding: 15px; margin-bottom: 20px; border-radius: 5px; border: 1px solid #ffeeba;">
+                        <strong>Note:</strong> This analysis is based on a sample of {len(results_to_process)} messages from your total conversation of {len(results)} messages.
+                        The sample includes the beginning, middle, and end sections of your chat to provide a balanced analysis.
+                    </div>
+                    """
+                    html_content = re.sub(body_pattern, lambda m: m.group(0) + sampling_notice, html_content)
+            
+            return html_content
+            
+        except openai.RateLimitError as e:
+            retry_count += 1
+            logger.warning(f"Rate limit exceeded (attempt {retry_count}/{max_retries}): {e}")
+            
+            if retry_count <= max_retries:
+                logger.info(f"Retrying in {backoff_time} seconds...")
+                time.sleep(backoff_time)
+                backoff_time *= 2  # Exponential backoff
+                
+                # If this is the last retry, reduce the sample size further
+                if retry_count == max_retries and len(results_to_process) > 300:
+                    # Reduce to about 300 messages for the final attempt
+                    truncated_results = []
+                    
+                    # Keep beginning, middle, and end with smaller samples
+                    truncated_results.extend(results_to_process[:100])
+                    
+                    # Middle section
+                    middle_start = len(results_to_process) // 2 - 50
+                    truncated_results.extend(results_to_process[middle_start:middle_start+100])
+                    
+                    # End section
+                    truncated_results.extend(results_to_process[-100:])
+                    
+                    results_to_process = truncated_results
+                    results_json = json.dumps(results_to_process, indent=2)
+                    logger.info(f"Финальная попытка с уменьшенной выборкой из {len(results_to_process)} сообщений")
+            else:
+                logger.error("Достигнуто максимальное количество попыток. Возвращаем шаблон ошибки.")
+                raise
+                
+        except openai.OpenAIError as e:
+            logger.error(f"OpenAI API error in meta analysis: {e}")
+            
+            if "context_length_exceeded" in str(e):
+                # Handle context length exceeded error specifically
+                logger.warning("Context length exceeded, trying with a smaller sample")
+                
+                # Extract and preserve key quotes from the original results
+                preserved_quotes = []
+                for result in results_to_process:
+                    if "key_quotes" in result and result["key_quotes"]:
+                        for quote in result["key_quotes"]:
+                            if quote and len(quote) > 5:  # Ensure it's a meaningful quote
+                                preserved_quotes.append({
+                                    "quote": quote,
+                                    "author": result.get("author", "Unknown"),
+                                    "sentiment": result.get("sentiment", "neutral"),
+                                    "emotion": result.get("emotion", "unknown")
+                                })
+                
+                # Reduce the sample size dramatically
+                if len(results_to_process) > 100:
+                    reduced_sample = []
+                    
+                    # Take just 30 messages from start, middle and end
+                    reduced_sample.extend(results_to_process[:30])
+                    
+                    middle_idx = len(results_to_process) // 2
+                    reduced_sample.extend(results_to_process[middle_idx-15:middle_idx+15])
+                    
+                    reduced_sample.extend(results_to_process[-30:])
+                    
+                    results_to_process = reduced_sample
+                    results_json = json.dumps(results_to_process, indent=2)
+                    
+                    logger.info(f"Retrying with minimal sample of {len(results_to_process)} messages")
+                    
+                    # Add preserved quotes to the user prompt
+                    quotes_json = json.dumps(preserved_quotes, indent=2)
+                    quotes_prompt = f"""
+                    ВАЖНО: Включите эти ключевые цитаты в раздел "Ключевые цитаты", даже если они не присутствуют в сокращенной выборке сообщений:
+                    {quotes_json}
+                    """
+                    
+                    # Try once more with the reduced sample
+                    try:
+                        response = await client.chat.completions.create(
+                            model=settings.META_MODEL,
+                            messages=[
+                                {"role": "system", "content": META_PROMPT},
+                                {"role": "user", "content": f"Here is a sample of the analyzed chat data in JSON format:\n\n{results_json}\n\n{quotes_prompt}"}
+                            ],
+                            temperature=0.7,
+                            max_tokens=4000,
+                            n=1
+                        )
+                        
+                        html_content = response.choices[0].message.content
+                        
+                        # Add sampling disclaimer
+                        import re
+                        body_pattern = r'<body[^>]*>'
+                        if re.search(body_pattern, html_content):
+                            sampling_notice = f"""
+                            <div style="background-color: #fff3cd; padding: 15px; margin-bottom: 20px; border-radius: 5px; border: 1px solid #ffeeba;">
+                                <strong>Note:</strong> Due to the large size of your conversation, this analysis is based on a limited sample of {len(results_to_process)} messages 
+                                from your total conversation of {len(results)} messages.
+                            </div>
+                            """
+                            html_content = re.sub(body_pattern, lambda m: m.group(0) + sampling_notice, html_content)
+                            
+                        return html_content
+                    except Exception as inner_error:
+                        logger.error(f"Error in retry with minimal sample: {inner_error}")
+            
+            # Return a basic error HTML
+            return f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Chat X-Ray: Ошибка отчета</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }}
+                    h1 {{ color: #e74c3c; text-align: center; }}
+                    .error {{ background-color: #f8d7da; padding: 20px; border-radius: 5px; }}
+                    .suggestion {{ background-color: #e8f4fd; padding: 15px; border-radius: 5px; margin-top: 20px; }}
+                </style>
+            </head>
+            <body>
+                <h1>Ошибка при создании отчета</h1>
+                <div class="error">
+                    <p>При анализе вашего чата произошла ошибка:</p>
+                    <p><strong>{str(e)}</strong></p>
+                    <p>Пожалуйста, попробуйте еще раз позже или обратитесь в службу поддержки, если проблема не исчезнет.</p>
+                </div>
+                <div class="suggestion">
+                    <p><strong>Возможные решения:</strong></p>
+                    <ul>
+                        <li>Загрузите файл меньшего размера</li>
+                        <li>Убедитесь, что файл содержит текстовые сообщения в правильном формате</li>
+                        <li>Попробуйте снова через несколько минут</li>
+                    </ul>
+                </div>
+            </body>
+            </html>
+            """ 

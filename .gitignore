@@ -1,0 +1,36 @@
+# Environment variables
+.env
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Logs
+*.log
+*_log.txt
+
+# Uploaded files and reports
+uploads/*
+reports/*
+!uploads/.gitkeep
+!reports/.gitkeep
+
+# Local development
+.idea/
+.vscode/
+
+# System files
+.DS_Store
+Thumbs.db 

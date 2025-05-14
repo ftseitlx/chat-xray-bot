@@ -1,0 +1,51 @@
+[2023-05-01 10:30:15] Alice: Hey, how are you today?
+
+[2023-05-01 10:31:22] Bob: I'm doing pretty well, thanks for asking! How about you?
+
+[2023-05-01 10:33:45] Alice: Not bad. I wanted to talk to you about the plans for this weekend.
+
+[2023-05-01 10:35:13] Bob: Sure, what did you have in mind?
+
+[2023-05-01 10:36:50] Alice: I was thinking we could go to that new restaurant downtown. The one you mentioned last week.
+
+[2023-05-01 10:38:10] Bob: Oh, that sounds great! I've been wanting to try that place.
+
+[2023-05-01 10:40:23] Alice: Perfect! What time works for you?
+
+[2023-05-01 10:41:55] Bob: How about 7pm on Saturday?
+
+[2023-05-01 10:43:12] Alice: That should work for me. I'll make a reservation.
+
+[2023-05-01 10:45:30] Bob: Great, looking forward to it! 
+
+[2023-05-01 18:22:07] Alice: Hey, just confirming our dinner plans for tomorrow at 7.
+
+[2023-05-01 18:45:12] Bob: Yes, still on! Can't wait.
+
+[2023-05-01 18:46:30] Alice: Actually, I just realized I double-booked myself. I have a work thing tomorrow night that I completely forgot about.
+
+[2023-05-01 18:48:45] Bob: Oh no... that's disappointing. You've been doing this a lot lately.
+
+[2023-05-01 18:50:22] Alice: What do you mean?
+
+[2023-05-01 18:52:15] Bob: This is the third time you've canceled plans at the last minute. It's becoming a pattern.
+
+[2023-05-01 18:54:03] Alice: That's not fair. I've been really busy with work.
+
+[2023-05-01 18:56:40] Bob: I understand being busy, but it feels like you're not prioritizing our time together.
+
+[2023-05-01 18:58:12] Alice: Are you seriously questioning my commitment? I work 60 hours a week and still try to make time for us.
+
+[2023-05-01 19:01:45] Bob: I'm not questioning your commitment, I'm just expressing how I feel when plans keep changing.
+
+[2023-05-01 19:03:20] Alice: Well, it makes me feel like you don't understand the pressure I'm under.
+
+[2023-05-01 19:05:55] Bob: I'm trying to understand. Maybe we can reschedule for Sunday instead?
+
+[2023-05-01 19:08:10] Alice: Sunday should work, yes. I'm sorry for being snappy. It's been a stressful week.
+
+[2023-05-01 19:10:33] Bob: It's okay. I know things are tough right now. Let's have dinner on Sunday and just relax.
+
+[2023-05-01 19:12:45] Alice: That sounds perfect. Thank you for being understanding.
+
+[2023-05-01 19:14:22] Bob: Of course. We're a team, we'll figure it out together. 

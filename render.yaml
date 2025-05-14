@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: chat-xray-bot
+    env: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: WEBHOOK_HOST
+        fromService:
+          name: chat-xray-bot
+          type: web
+          property: host
+      - key: WEBHOOK_PATH
+        value: /webhook
+      - key: PORT
+        value: 8080
+      - key: HOST
+        value: 0.0.0.0
+      - key: UPLOAD_RETENTION_HOURS
+        value: 1
+      - key: REPORT_RETENTION_HOURS
+        value: 72
+      - key: ENABLE_COST_TRACKING
+        value: true 
