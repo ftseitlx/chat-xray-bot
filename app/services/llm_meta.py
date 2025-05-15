@@ -302,7 +302,8 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
             # Preserve quotes if we had to reduce the dataset
             quotes_prompt = ""
             if len(results_to_process) < len(results) and all_key_quotes:
-                quotes_json = json.dumps(all_key_quotes[:100], indent=None, ensure_ascii=False)  # Limit to 100 most important quotes
+                # Provide up to 200 quotes to ensure >60 real ones available
+                quotes_json = json.dumps(all_key_quotes[:200], indent=None, ensure_ascii=False)
                 quotes_prompt = f"""
                 ВАЖНО: Включите эти ключевые цитаты в раздел "Ключевые цитаты", даже если они не присутствуют в сокращенной выборке сообщений:
                 {quotes_json}
@@ -329,7 +330,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
                         },
                     ],
                     temperature=0.7,
-                    max_tokens=4096,
+                    max_tokens=8192,
                     n=1
                 )
                 content = resp.choices[0].message.content
@@ -337,13 +338,13 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
                 return content, t_used
 
             # --- First half (sections 1-4) ---
-            html_part1, tokens1 = await _gpt_call("разделы 1-4 (Обзор, Паттерны, Эмоции, Токсичные взаимодействия)", True)
+            html_part1, tokens1 = await _gpt_call("разделы 1-4 (Обзор ≥600 слов, Паттерны ≥500, Эмоции ≥500, Токсичные взаимодействия ≥300)", True)
 
             # --- Second half (sections 5-9 + графика) ---
             # Strengthen requirements for graphics in the second part
             second_hint = (
-                "разделы 5-9 (Цитаты, Инсайты, Рекомендации, Количественный анализ, Индивидуальные портреты) и ОБЯЗАТЕЛЬНО минимум 7 SVG графиков. "
-                "Используй данные из блока AGG_METRICS для построения графиков, не выдумывай числа. "
+                "разделы 5-9 (Цитаты ≥60 шт с анализом ≥50 слов каждая, Инсайты ≥600 слов, Рекомендации ≥10 по 100+ слов, Количественный анализ, Индивидуальные портреты ≥500 слов/участник) "
+                "и ОБЯЗАТЕЛЬНО минимум 7 SVG графиков. Используй данные из AGG_METRICS, числа не выдумывай. "
                 "Каждый график должен иметь уникальный id вида 'chart-1', 'chart-2', ... и подпись. Не используй внешние библиотеки." 
             )
             html_part2_raw, tokens2 = await _gpt_call(second_hint, False)
@@ -592,7 +593,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
                 # Generate quotes prompt from all key quotes
                 quotes_prompt = ""
                 if all_key_quotes:
-                    quotes_json = json.dumps(all_key_quotes[:30], indent=None, ensure_ascii=False)  # Limit to 30 most important quotes
+                    quotes_json = json.dumps(all_key_quotes[:60], indent=None, ensure_ascii=False)
                     quotes_prompt = f"""
                     ВАЖНО: Включите эти ключевые цитаты в раздел "Ключевые цитаты", даже если они не присутствуют в сокращенной выборке сообщений:
                     {quotes_json}
@@ -607,7 +608,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
                             {"role": "user", "content": f"Создайте психологический отчет на РУССКОМ языке на основе этой выборки сообщений:\n\n{results_json}\n\n{quotes_prompt}"}
                         ],
                         temperature=0.7,
-                        max_tokens=4096,
+                        max_tokens=8192,
                         n=1
                     )
                     
