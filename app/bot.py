@@ -364,17 +364,29 @@ async def handle_document(message: Message):
             os.unlink(upload_file_path)
             return
         
-        # Process chunks with GPT-3.5
-        logger.info(f"Starting chunk processing with {settings.PRIMARY_MODEL}")
+        # Progress bar helper
+        def _build_progress_bar(done: int, total: int, bar_len: int = 20) -> str:
+            """Return a unicode progress bar string."""
+            filled = int(bar_len * done / total) if total else 0
+            bar = "█" * filled + "░" * (bar_len - filled)
+            return f"[{bar}] {done}/{total}"
+
+        # Initial progress message
         await safe_edit_message(
             status_message,
-            f"🔄 <b>Обрабатываю {num_chunks} фрагментов данных чата</b> (параллельно)...\n\n"
-            "⚠️ <b>Важно:</b> Все личные данные в чате анонимизируются при обработке. "
-            "Конфиденциальность ваших сообщений сохраняется."
+            f"🔄 <b>Обрабатываю фрагменты данных чата</b> 0/{num_chunks}\n{_build_progress_bar(0, num_chunks)}",
+            parse_mode=ParseMode.HTML,
         )
-        
+
         try:
-            analysis_results = await process_chunks(chunks)
+            async def _progress_callback(done: int, total: int):
+                await safe_edit_message(
+                    status_message,
+                    f"🔄 <b>Обрабатываю фрагменты данных чата</b> {done}/{total}\n{_build_progress_bar(done, total)}",
+                    parse_mode=ParseMode.HTML,
+                )
+
+            analysis_results = await process_chunks(chunks, progress_callback=_progress_callback)
             logger.info(f"Successfully processed {len(analysis_results)} chunk results")
             
             # Generate meta report with GPT-4

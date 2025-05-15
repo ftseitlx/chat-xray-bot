@@ -3,7 +3,7 @@ import logging
 import time
 import asyncio
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Callable, Awaitable, Optional
 
 import openai
 from openai import AsyncOpenAI
@@ -153,12 +153,16 @@ async def process_chunk(chunk: List[Dict[str, Any]], max_retries: int = 3) -> Li
             return [{"error": str(e), "raw_input": msg["raw"]} for msg in chunk]
 
 
-async def process_chunks(chunks: List[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+async def process_chunks(
+    chunks: List[List[Dict[str, Any]]],
+    progress_callback: Optional[Callable[[int, int], Awaitable[None]]] = None,
+) -> List[Dict[str, Any]]:
     """
     Process all chunks of messages in parallel and combine the results.
     
     Args:
         chunks: List of chunks, where each chunk is a list of message dictionaries
+        progress_callback: Optional callback function to report progress
         
     Returns:
         List of all processed message dictionaries with analysis
@@ -173,7 +177,14 @@ async def process_chunks(chunks: List[List[Dict[str, Any]]]) -> List[Dict[str, A
         """Process a chunk with semaphore to limit concurrency"""
         async with semaphore:
             logger.info(f"Processing chunk {i+1}/{len(chunks)}")
-            return await process_chunk(chunk)
+            result = await process_chunk(chunk)
+            # Report progress if callback provided
+            if progress_callback:
+                try:
+                    await progress_callback(i + 1, len(chunks))
+                except Exception as cb_err:
+                    logger.warning(f"Progress callback error: {cb_err}")
+            return result
     
     # Create tasks for all chunks
     tasks = [process_with_semaphore(i, chunk) for i, chunk in enumerate(chunks)]
