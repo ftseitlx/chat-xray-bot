@@ -378,165 +378,158 @@ async def handle_document(message: Message):
             parse_mode=ParseMode.HTML,
         )
 
-        try:
-            async def _progress_callback(done: int, total: int):
+        # Throttle progress updates to avoid Telegram flood & race conditions
+        progress_lock = asyncio.Lock()
+        _last_update_ts: float = 0.0  # nonlocal for closure
+
+        async def _progress_callback(done: int, total: int):
+            nonlocal _last_update_ts
+            # Update no more than once per second
+            now = asyncio.get_event_loop().time()
+            if now - _last_update_ts < 1:
+                return
+            _last_update_ts = now
+
+            async with progress_lock:
                 await safe_edit_message(
                     status_message,
                     f"🔄 <b>Обрабатываю фрагменты данных чата</b> {done}/{total}\n{_build_progress_bar(done, total)}",
                     parse_mode=ParseMode.HTML,
                 )
 
-            analysis_results = await process_chunks(chunks, progress_callback=_progress_callback)
-            logger.info(f"Successfully processed {len(analysis_results)} chunk results")
+        analysis_results = await process_chunks(chunks, progress_callback=_progress_callback)
+        logger.info(f"Successfully processed {len(analysis_results)} chunk results")
+        
+        # Generate meta report with GPT-4
+        logger.info(f"Starting meta report generation with {settings.META_MODEL}")
+        await safe_edit_message(status_message, "✨ Создаю психологические выводы и генерирую отчет...")
+        
+        try:
+            html_content = await generate_meta_report(analysis_results)
+            logger.info("Successfully generated meta report HTML content")
             
-            # Generate meta report with GPT-4
-            logger.info(f"Starting meta report generation with {settings.META_MODEL}")
-            await safe_edit_message(status_message, "✨ Создаю психологические выводы и генерирую отчет...")
+            # Save HTML content to file
+            logger.info(f"Saving HTML content to {html_file_path}")
+            with open(html_file_path, "w", encoding="utf-8") as f:
+                f.write(html_content)
             
-            try:
-                html_content = await generate_meta_report(analysis_results)
-                logger.info("Successfully generated meta report HTML content")
+            # Render HTML to PDF
+            logger.info(f"Rendering HTML to PDF at {report_file_path}")
+            pdf_url = await render_to_pdf(html_file_path, report_file_path)
+            
+            # Generate a public URL for the PDF
+            report_url = f"{settings.WEBHOOK_HOST}/reports/{os.path.basename(report_file_path)}" if settings.WEBHOOK_HOST else f"file://{report_file_path}"
+            logger.info(f"Report URL: {report_url}")
+            
+            # Calculate and log approximate cost
+            approx_cost = (num_chunks * 0.0005) + 0.01  # $0.0005 per chunk for GPT-3.5 + $0.01 for GPT-4 Turbo
+            await log_cost(message.from_user.id, num_chunks, approx_cost)
+            
+            # Extract insights for Telegram message
+            logger.info("Extracting insights for Telegram message")
+            telegram_insights = await extract_insights_for_telegram(html_content)
+            
+            # Send success message with download option
+            
+            # If we're in local mode without a webhook, just send the file directly
+            if not settings.WEBHOOK_HOST:
+                logger.info("Running in local mode, sending file directly")
+                await safe_delete_message(status_message)
                 
-                # Save HTML content to file
-                logger.info(f"Saving HTML content to {html_file_path}")
-                with open(html_file_path, "w", encoding="utf-8") as f:
-                    f.write(html_content)
-                
-                # Render HTML to PDF
-                logger.info(f"Rendering HTML to PDF at {report_file_path}")
-                pdf_url = await render_to_pdf(html_file_path, report_file_path)
-                
-                # Generate a public URL for the PDF
-                report_url = f"{settings.WEBHOOK_HOST}/reports/{os.path.basename(report_file_path)}" if settings.WEBHOOK_HOST else f"file://{report_file_path}"
-                logger.info(f"Report URL: {report_url}")
-                
-                # Calculate and log approximate cost
-                approx_cost = (num_chunks * 0.0005) + 0.01  # $0.0005 per chunk for GPT-3.5 + $0.01 for GPT-4 Turbo
-                await log_cost(message.from_user.id, num_chunks, approx_cost)
-                
-                # Extract insights for Telegram message
-                logger.info("Extracting insights for Telegram message")
-                telegram_insights = await extract_insights_for_telegram(html_content)
-                
-                # Send success message with download option
-                
-                # If we're in local mode without a webhook, just send the file directly
-                if not settings.WEBHOOK_HOST:
-                    logger.info("Running in local mode, sending file directly")
-                    await safe_delete_message(status_message)
-                    
-                    # First send insights as HTML message
-                    logger.info("Sending insights message")
-                    await safe_send_message(
-                        message,
-                        telegram_insights,
-                        parse_mode=ParseMode.HTML
-                    )
-                    
-                    # Then send the full report as a document
-                    logger.info("Sending report document")
-                    await safe_send_message(
-                        message,
-                        "Отправляю полный отчет..."
-                    )
-                    
-                    # Use safe task for document sending
-                    async def _send_document():
-                        logger.info("[TIMEOUT-FIX] Inside _send_document task")
-                        try:
-                            result = await message.answer_document(
-                                FSInputFile(report_file_path),
-                                caption="Ваш полный отчет Chat X-Ray готов. Этот файл будет доступен в течение 72 часов."
-                            )
-                            logger.info("[TIMEOUT-FIX] Document sent successfully")
-                            return result
-                        except Exception as inner_e:
-                            logger.error(f"[TIMEOUT-FIX] Error in document sending task: {inner_e}")
-                            return None
-                    
-                    logger.info("[TIMEOUT-FIX] Creating task for document sending")
-                    await asyncio.create_task(_send_document())
-                    logger.info("[TIMEOUT-FIX] Document sending task completed")
-                else:
-                    # In production with webhook, send insights and a link
-                    logger.info("Running in webhook mode, sending link to report")
-                    await safe_delete_message(status_message)
-                    
-                    # First send insights as HTML message
-                    logger.info("Sending insights message")
-                    await safe_send_message(
-                        message,
-                        telegram_insights,
-                        parse_mode=ParseMode.HTML
-                    )
-                    
-                    # Then send the link to full report
-                    logger.info("Creating download button with URL")
-                    download_markup = InlineKeyboardMarkup(
-                        inline_keyboard=[
-                            [InlineKeyboardButton(
-                                text="📊 Скачать полный отчет",
-                                url=report_url
-                            )]
-                        ]
-                    )
-                    
-                    logger.info("Sending download button message")
-                    await safe_send_message(
-                        message,
-                        "📋 Для получения полного отчета нажмите на кнопку ниже:",
-                        reply_markup=download_markup
-                    )
-                
-                # Add metadata to track file expiration
-                logger.info("Adding file expiration metadata")
-                expiration_time = datetime.now().timestamp() + (settings.REPORT_RETENTION_HOURS * 3600)
-                with open(f"{report_file_path}.meta", "w") as f:
-                    f.write(str(expiration_time))
-                
-                # Delete the original upload file metadata
-                upload_expiration_time = datetime.now().timestamp() + (settings.UPLOAD_RETENTION_HOURS * 3600)
-                with open(f"{upload_file_path}.meta", "w") as f:
-                    f.write(str(upload_expiration_time))
-                
-                logger.info(f"Successfully completed processing file for user {message.from_user.id}")
-                
-            except openai.RateLimitError as e:
-                logger.error(f"Rate limit error during meta analysis: {e}")
-                await safe_edit_message(
-                    status_message,
-                    "⚠️ Мы достигли ограничения запросов при создании отчета.\n\n"
-                    "Это обычно происходит при обработке очень больших чатов или в периоды пиковой нагрузки.\n\n"
-                    "Пожалуйста, попробуйте загрузить файл меньшего размера или повторите попытку через несколько минут."
+                # First send insights as HTML message
+                logger.info("Sending insights message")
+                await safe_send_message(
+                    message,
+                    telegram_insights,
+                    parse_mode=ParseMode.HTML
                 )
                 
-            except Exception as e:
-                logger.exception(f"Error in meta analysis: {e}")
-                await safe_edit_message(
-                    status_message,
-                    "❌ Произошла ошибка при создании отчета.\n\n"
-                    f"Детали ошибки: {str(e)}\n\n"
-                    "Пожалуйста, попробуйте еще раз или обратитесь в поддержку, если проблема не исчезнет."
+                # Then send the full report as a document
+                logger.info("Sending report document")
+                await safe_send_message(
+                    message,
+                    "Отправляю полный отчет..."
                 )
                 
+                # Use safe task for document sending
+                async def _send_document():
+                    logger.info("[TIMEOUT-FIX] Inside _send_document task")
+                    try:
+                        result = await message.answer_document(
+                            FSInputFile(report_file_path),
+                            caption="Ваш полный отчет Chat X-Ray готов. Этот файл будет доступен в течение 72 часов."
+                        )
+                        logger.info("[TIMEOUT-FIX] Document sent successfully")
+                        return result
+                    except Exception as inner_e:
+                        logger.error(f"[TIMEOUT-FIX] Error in document sending task: {inner_e}")
+                        return None
+                
+                logger.info("[TIMEOUT-FIX] Creating task for document sending")
+                await asyncio.create_task(_send_document())
+                logger.info("[TIMEOUT-FIX] Document sending task completed")
+            else:
+                # In production with webhook, send insights and a link
+                logger.info("Running in webhook mode, sending link to report")
+                await safe_delete_message(status_message)
+                
+                # First send insights as HTML message
+                logger.info("Sending insights message")
+                await safe_send_message(
+                    message,
+                    telegram_insights,
+                    parse_mode=ParseMode.HTML
+                )
+                
+                # Then send the link to full report
+                logger.info("Creating download button with URL")
+                download_markup = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(
+                            text="📊 Скачать полный отчет",
+                            url=report_url
+                        )]
+                    ]
+                )
+                
+                logger.info("Sending download button message")
+                await safe_send_message(
+                    message,
+                    "📋 Для получения полного отчета нажмите на кнопку ниже:",
+                    reply_markup=download_markup
+                )
+            
+            # Add metadata to track file expiration
+            logger.info("Adding file expiration metadata")
+            expiration_time = datetime.now().timestamp() + (settings.REPORT_RETENTION_HOURS * 3600)
+            with open(f"{report_file_path}.meta", "w") as f:
+                f.write(str(expiration_time))
+            
+            # Delete the original upload file metadata
+            upload_expiration_time = datetime.now().timestamp() + (settings.UPLOAD_RETENTION_HOURS * 3600)
+            with open(f"{upload_file_path}.meta", "w") as f:
+                f.write(str(upload_expiration_time))
+            
+            logger.info(f"Successfully completed processing file for user {message.from_user.id}")
+            
         except openai.RateLimitError as e:
-            logger.error(f"Rate limit error during chunk processing: {e}")
+            logger.error(f"Rate limit error during meta analysis: {e}")
             await safe_edit_message(
                 status_message,
-                "⚠️ Мы достигли ограничения запросов при анализе вашего чата.\n\n"
+                "⚠️ Мы достигли ограничения запросов при создании отчета.\n\n"
                 "Это обычно происходит при обработке очень больших чатов или в периоды пиковой нагрузки.\n\n"
                 "Пожалуйста, попробуйте загрузить файл меньшего размера или повторите попытку через несколько минут."
             )
             
         except Exception as e:
-            logger.exception(f"Error in chunk processing: {e}")
+            logger.exception(f"Error in meta analysis: {e}")
             await safe_edit_message(
                 status_message,
-                "❌ Произошла ошибка при анализе вашего чата.\n\n"
+                "❌ Произошла ошибка при создании отчета.\n\n"
                 f"Детали ошибки: {str(e)}\n\n"
                 "Пожалуйста, попробуйте еще раз или обратитесь в поддержку, если проблема не исчезнет."
             )
-        
+            
     except Exception as e:
         logger.exception(f"Error processing file: {e}")
         if settings.SENTRY_DSN:
