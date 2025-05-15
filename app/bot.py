@@ -20,6 +20,7 @@ from aiohttp import web
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import re
 from bs4 import BeautifulSoup
+from aiogram.client.default import DefaultBotProperties
 
 from app.config import settings
 from app.utils import cleanup
@@ -48,10 +49,10 @@ if settings.SENTRY_DSN:
         traces_sample_rate=0.1,
     )
 
-# Initialize bot and dispatcher with updated syntax for aiogram 3.x
+# Initialize bot with aiogram 3.7+ syntax using DefaultBotProperties
 bot = Bot(
     token=settings.BOT_TOKEN,
-    parse_mode=ParseMode.HTML
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
 dp = Dispatcher(storage=MemoryStorage())
 
