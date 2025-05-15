@@ -158,8 +158,9 @@ META_PROMPT = """
 5. Сделайте отчёт МАКСИМАЛЬНО ГЛУБОКИМ и ПРОНИЦАТЕЛЬНЫМ, как если бы его подготовил ведущий эксперт в психологии отношений.
 6. ВСЕ ГРАФИКИ ДОЛЖНЫ БЫТЬ СОЗДАНЫ на основе РЕАЛЬНЫХ ДАННЫХ анализа и находиться прямо в HTML (SVG/CSS/JS).
 7. ОБЯЗАТЕЛЬНО включите ВСЕ цитаты, которые были предоставлены в дополнительных данных, даже если они отсутствуют в основной выборке.
-8. Убедитесь, что итоговый HTML легко конвертируется в PDF без потери форматирования.
-9. Включите отдельный под-раздел для КАЖДОГО участника с подробным психологическим портретом, с обязательными ссылками на приведённые цитаты.
+8. СТРОГО ЗАПРЕЩЕНО придумывать или искажать цитаты — используйте ТОЛЬКО фактические цитаты из предоставленных данных.
+9. Убедитесь, что итоговый HTML легко конвертируется в PDF без потери форматирования.
+10. Включите отдельный под-раздел для КАЖДОГО участника с подробным психологическим портретом, с обязательными ссылками на приведённые цитаты.
 
 Ваш вывод должен быть ТОЛЬКО допустимым HTML (со встроенным CSS и JavaScript), который можно напрямую преобразовать в PDF.
 """
@@ -225,6 +226,42 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
     all_key_quotes = extract_key_quotes(results)
     logger.info(f"Extracted {len(all_key_quotes)} key quotes for preservation")
     
+    # -------------------------------------------------
+    #  Compute aggregated quantitative metrics per author
+    # -------------------------------------------------
+    from collections import defaultdict
+
+    def compute_metrics_summary(msgs):
+        per_author = defaultdict(lambda: defaultdict(list))
+        for m in msgs:
+            author = m.get("author", "Unknown")
+            # Core scalar fields to average
+            for field in [
+                "sentiment_score",
+                "toxicity",
+                "manipulation",
+                "empathy",
+                "assertiveness",
+                "emotion_intensity",
+            ]:
+                val = m.get(field)
+                if isinstance(val, (int, float)):
+                    per_author[author][field].append(val)
+
+            # Gottman horsemen breakdown
+            horsemen = m.get("gottman_horsemen", {})
+            for hk, hv in (horsemen or {}).items():
+                if isinstance(hv, (int, float)):
+                    per_author[author][f"horsemen_{hk}"].append(hv)
+
+        summary = {}
+        for author, metrics in per_author.items():
+            summary[author] = {k: (sum(v)/len(v) if v else 0) for k, v in metrics.items()}
+        return summary
+
+    metrics_summary = compute_metrics_summary(results)
+    metrics_json = json.dumps(metrics_summary, ensure_ascii=False)
+    
     # Start with an optimistic sampling approach
     max_context_tokens = 110000  # Leave room for prompt and response
     target_token_budget = 90000
@@ -281,7 +318,15 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
                     model=settings.META_MODEL,
                     messages=[
                         {"role": "system", "content": sys_prompt},
-                        {"role": "user", "content": f"На основе данных:\n\n{results_json}\n\n{quotes_prompt}"}
+                        {
+                            "role": "user",
+                            "content": (
+                                f"НА ОСНОВЕ СЛЕДУЮЩИХ ДАННЫХ анализа сообщений (JSON):\n" \
+                                f"{results_json}\n\n" \
+                                f"AGG_METRICS:\n{metrics_json}\n\n" \
+                                f"{quotes_prompt}"
+                            ),
+                        },
                     ],
                     temperature=0.7,
                     max_tokens=4096,
@@ -294,10 +339,11 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
             # --- First half (sections 1-4) ---
             html_part1, tokens1 = await _gpt_call("разделы 1-4 (Обзор, Паттерны, Эмоции, Токсичные взаимодействия)", True)
 
-            # --- Second half (sections 5-8 + графика) ---
+            # --- Second half (sections 5-9 + графика) ---
             # Strengthen requirements for graphics in the second part
             second_hint = (
-                "разделы 5-8 (Цитаты, Инсайты, Рекомендации, Количественный анализ) И ОБЯЗАТЕЛЬНО минимум 5 SVG графиков. "
+                "разделы 5-9 (Цитаты, Инсайты, Рекомендации, Количественный анализ, Индивидуальные портреты) и ОБЯЗАТЕЛЬНО минимум 7 SVG графиков. "
+                "Используй данные из блока AGG_METRICS для построения графиков, не выдумывай числа. "
                 "Каждый график должен иметь уникальный id вида 'chart-1', 'chart-2', ... и подпись. Не используй внешние библиотеки." 
             )
             html_part2_raw, tokens2 = await _gpt_call(second_hint, False)
