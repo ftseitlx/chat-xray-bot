@@ -62,53 +62,16 @@ main_router = Router()
 
 # Helper function to safely send messages in a task
 async def safe_send_message(message: Message, text: str, **kwargs):
-    """Send a message safely in a task to avoid timeout context errors"""
-    logger.info("[TIMEOUT-FIX] safe_send_message called with message: " + text[:20] + "...")
+    """Send a Telegram message with basic retry logic (no extra tasks)."""
     try:
-        # Define a function to be executed in a proper task context
-        async def _send():
-            logger.info("[TIMEOUT-FIX] Inside _send task function")
-            try:
-                logger.info("[TIMEOUT-FIX] About to call message.answer()")
-                result = await message.answer(text, **kwargs)
-                logger.info("[TIMEOUT-FIX] message.answer() completed successfully")
-                return result
-            except Exception as inner_e:
-                logger.error(f"[TIMEOUT-FIX] Error in _send task: {inner_e}")
-                return None
-        
-        # Execute the sending in a proper task context
-        logger.info("[TIMEOUT-FIX] Creating task for _send()")
-        task = asyncio.create_task(_send())
-        logger.info("[TIMEOUT-FIX] Task created, awaiting result")
-        result = await task
-        logger.info("[TIMEOUT-FIX] Task completed successfully")
-        return result
+        return await message.answer(text, **kwargs)
     except Exception as e:
-        logger.error(f"[TIMEOUT-FIX] Error creating send message task: {e}")
-        # Try one more time with a delay
+        logger.warning(f"safe_send_message error: {e} – retrying once")
         await asyncio.sleep(0.5)
         try:
-            # Create a new task for the retry
-            logger.info("[TIMEOUT-FIX] Retrying with new task after error")
-            async def _retry_send():
-                logger.info("[TIMEOUT-FIX] Inside retry _send task")
-                try:
-                    result = await message.answer(text, **kwargs)
-                    logger.info("[TIMEOUT-FIX] Retry message.answer() completed successfully")
-                    return result
-                except Exception as inner_e:
-                    logger.error(f"[TIMEOUT-FIX] Error in retry _send task: {inner_e}")
-                    return None
-            
-            logger.info("[TIMEOUT-FIX] Creating retry task")
-            task = asyncio.create_task(_retry_send())
-            logger.info("[TIMEOUT-FIX] Retry task created, awaiting result")
-            result = await task
-            logger.info("[TIMEOUT-FIX] Retry task completed successfully")
-            return result
+            return await message.answer(text, **kwargs)
         except Exception as e2:
-            logger.error(f"[TIMEOUT-FIX] Second attempt failed: {e2}")
+            logger.error(f"safe_send_message failed again: {e2}")
             return None
 
 
@@ -265,34 +228,15 @@ async def extract_insights_for_telegram(html_content: str) -> str:
 
 # Helper function to safely edit a message
 async def safe_edit_message(message: Message, text: str, **kwargs):
-    """Edit a message safely in a task to avoid timeout context errors"""
     try:
-        # Define a function to be executed in a proper task context
-        async def _edit():
-            try:
-                return await message.edit_text(text, **kwargs)
-            except Exception as inner_e:
-                logger.error(f"Error in _edit task: {inner_e}")
-                return None
-        
-        # Execute the editing in a proper task context
-        return await asyncio.create_task(_edit())
+        return await message.edit_text(text, **kwargs)
     except Exception as e:
-        logger.error(f"Error creating edit message task: {e}")
-        # Try one more time with a delay
+        logger.warning(f"safe_edit_message error: {e} – retrying once")
         await asyncio.sleep(0.5)
         try:
-            # Create a new task for the retry
-            async def _retry_edit():
-                try:
-                    return await message.edit_text(text, **kwargs)
-                except Exception as inner_e:
-                    logger.error(f"Error in retry _edit task: {inner_e}")
-                    return None
-            
-            return await asyncio.create_task(_retry_edit())
+            return await message.edit_text(text, **kwargs)
         except Exception as e2:
-            logger.error(f"Second edit attempt failed: {e2}")
+            logger.error(f"safe_edit_message failed again: {e2}")
             return None
 
 
@@ -363,21 +307,8 @@ async def handle_document(message: Message):
         # Download the file
         logger.info("Starting file download")
         try:
-            # Create a proper download task and await it
-            async def _download_file():
-                logger.info("[TIMEOUT-FIX] Inside _download_file task")
-                try:
-                    file_path = await bot.download(message.document, destination=upload_file_path)
-                    logger.info(f"[TIMEOUT-FIX] File downloaded successfully to {file_path}")
-                    return file_path
-                except Exception as inner_e:
-                    logger.error(f"[TIMEOUT-FIX] Error in download task: {inner_e}")
-                    raise
-            
-            # Execute the download in a proper task context
-            logger.info("[TIMEOUT-FIX] Creating task for file download")
-            file_path = await asyncio.create_task(_download_file())
-            logger.info(f"[TIMEOUT-FIX] Download task completed: {file_path}")
+            file_path = await bot.download(message.document, destination=upload_file_path)
+            logger.info(f"File downloaded successfully to {file_path}")
             
             # Verify file was downloaded correctly
             if os.path.exists(upload_file_path):
