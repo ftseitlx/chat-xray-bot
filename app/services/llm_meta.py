@@ -339,7 +339,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
 
     # Work with a cleaned copy for token estimation / sending
     results_to_process_clean = strip_bulky_fields(results)
-    results_json = json.dumps(results_to_process_clean, indent=None)
+    results_json = json.dumps(results_to_process_clean, indent=None, ensure_ascii=False)
     estimated_tokens = estimate_tokens(results_json)
 
     # Iteratively shrink until we are under the budget
@@ -348,7 +348,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
     while estimated_tokens > target_token_budget and current_target_size > minimal_sample_size:
         current_target_size = max(minimal_sample_size, int(current_target_size * 0.8))
         results_to_process_clean = strip_bulky_fields(get_balanced_sample(results, current_target_size))
-        results_json = json.dumps(results_to_process_clean, indent=None)
+        results_json = json.dumps(results_to_process_clean, indent=None, ensure_ascii=False)
         estimated_tokens = estimate_tokens(results_json)
         logger.info(f"Adaptive reduction: {current_target_size} msgs, est {estimated_tokens} tokens")
 
@@ -445,6 +445,10 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
 
             # Inject additional CSS for better readability
             html_content = _inject_css(html_content)
+
+            # Decode any HTML numeric character references to ensure proper Cyrillic output
+            import html as _html_module
+            html_content = _html_module.unescape(html_content)
 
             tokens_used_meta = tokens1 + tokens2
             
@@ -608,7 +612,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
                 if retry_count == max_retries and len(results_to_process) > 150:
                     # Reduce to about 150 messages for the final attempt
                     results_to_process = get_balanced_sample(results, 150)
-                    results_json = json.dumps(results_to_process, indent=None)
+                    results_json = json.dumps(results_to_process, indent=None, ensure_ascii=False)
                     logger.info(f"Финальная попытка с уменьшенной выборкой из {len(results_to_process)} сообщений")
             else:
                 logger.error("Достигнуто максимальное количество попыток. Возвращаем шаблон ошибки.")
@@ -654,7 +658,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
                 # Use a much smaller sample for this retry
                 minimal_sample_size = 90
                 minimal_sample = get_balanced_sample(results, minimal_sample_size)
-                results_json = json.dumps(minimal_sample, indent=None)
+                results_json = json.dumps(minimal_sample, indent=None, ensure_ascii=False)
                 
                 logger.info(f"Retrying with minimal sample of {len(minimal_sample)} messages")
                 
@@ -682,6 +686,10 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
                     
                     html_content = response.choices[0].message.content
                     tokens_used_meta = response.usage.total_tokens if hasattr(response, "usage") and response.usage else 0
+                    
+                    # Decode numeric character references to proper Unicode
+                    import html as _html_module
+                    html_content = _html_module.unescape(html_content)
                     
                     # Add sampling disclaimer
                     import re
