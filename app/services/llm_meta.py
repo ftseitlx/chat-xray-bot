@@ -217,33 +217,36 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
     
     # Start with an optimistic sampling approach
     max_context_tokens = 110000  # Leave room for prompt and response
-    
-    # First sample: if more than 500 messages, start reducing
-    if len(results) > 500:
-        # Initial sampling - we'll refine further if needed
-        target_sample_size = min(500, len(results))
-        results_to_process = get_balanced_sample(results, target_sample_size)
-        logger.info(f"Initial sampling: {len(results)} messages → {len(results_to_process)} messages")
-    else:
-        results_to_process = results
-    
-    # Convert to JSON to check token count
-    results_json = json.dumps(results_to_process, indent=None)
+    target_token_budget = 90000
+
+    def strip_bulky_fields(msg_list):
+        """Return a deep-copied list with heavy fields removed."""
+        cleaned = []
+        for m in msg_list:
+            m_copy = m.copy()
+            # Remove or truncate very large fields that are not essential
+            m_copy.pop("key_quotes", None)  # quotes will be handled separately
+            cleaned.append(m_copy)
+        return cleaned
+
+    # Work with a cleaned copy for token estimation / sending
+    results_to_process_clean = strip_bulky_fields(results)
+    results_json = json.dumps(results_to_process_clean, indent=None)
     estimated_tokens = estimate_tokens(results_json)
-    
-    # If still too large, reduce further
-    if estimated_tokens > max_context_tokens:
-        # Calculate appropriate sample size based on token estimate
-        reduction_factor = max_context_tokens / estimated_tokens
-        new_target_size = max(90, int(len(results_to_process) * reduction_factor))
-        
-        # Re-sample with the calculated target size
-        results_to_process = get_balanced_sample(results, new_target_size)
-        results_json = json.dumps(results_to_process, indent=None)
+
+    # Iteratively shrink until we are under the budget
+    minimal_sample_size = 90
+    current_target_size = len(results_to_process_clean)
+    while estimated_tokens > target_token_budget and current_target_size > minimal_sample_size:
+        current_target_size = max(minimal_sample_size, int(current_target_size * 0.8))
+        results_to_process_clean = strip_bulky_fields(get_balanced_sample(results, current_target_size))
+        results_json = json.dumps(results_to_process_clean, indent=None)
         estimated_tokens = estimate_tokens(results_json)
-        
-        logger.info(f"Reduced sample: {len(results_to_process)} messages, estimated {estimated_tokens} tokens")
-    
+        logger.info(f"Adaptive reduction: {current_target_size} msgs, est {estimated_tokens} tokens")
+
+    # Ensure we operate with the cleaned, size-constrained data going forward
+    results_to_process = results_to_process_clean
+
     retry_count = 0
     backoff_time = settings.RETRY_DELAY_SECONDS  # Start with configured delay
     
