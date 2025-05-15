@@ -158,12 +158,13 @@ META_PROMPT = """
 """
 
 
-async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int = 3) -> Tuple[str, int]:
+async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int, max_retries: int = 3) -> Tuple[str, int]:
     """
     Generate a meta report from the analysis results using GPT-4 Turbo.
     
     Args:
         results: List of analyzed message dictionaries
+        total_messages: Total number of messages in the chat
         max_retries: Maximum number of retries on rate limit errors
         
     Returns:
@@ -461,7 +462,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
             msg_banner = (
                 f"""
                 <div style=\"background-color:#e8f4fd;padding:12px;margin-bottom:20px;border-left:4px solid #3498db;\">
-                    Отчёт подготовлен после анализа <b>{len(results)}</b> сообщений обеих сторон.
+                    Отчёт подготовлен после анализа <b>{total_messages}</b> сообщений обеих сторон.
                 </div>
                 """
             )

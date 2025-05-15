@@ -405,7 +405,8 @@ async def handle_document(message: Message):
         await safe_edit_message(status_message, "✨ Создаю психологические выводы и генерирую отчет...")
         
         try:
-            html_content, meta_tokens = await generate_meta_report(analysis_results)
+            total_messages = sum(len(chunk) for chunk in chunks)
+            html_content, meta_tokens = await generate_meta_report(analysis_results, total_messages)
             logger.info("Successfully generated meta report HTML content")
             
             # Save HTML content to file
