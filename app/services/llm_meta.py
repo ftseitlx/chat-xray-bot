@@ -391,7 +391,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
                         },
                     ],
                     temperature=0.7,
-                    max_tokens=8192,
+                    max_tokens=4096,
                     n=1
                 )
                 content = resp.choices[0].message.content
@@ -669,7 +669,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
                             {"role": "user", "content": f"Создайте психологический отчет на РУССКОМ языке на основе этой выборки сообщений:\n\n{results_json}\n\n{quotes_prompt}"}
                         ],
                         temperature=0.7,
-                        max_tokens=8192,
+                        max_tokens=4096,
                         n=1
                     )
                     
