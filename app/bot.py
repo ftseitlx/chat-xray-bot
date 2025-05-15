@@ -363,8 +363,20 @@ async def handle_document(message: Message):
         logger.info("Starting file download")
         try:
             # Create a proper download task and await it
-            file_path = await bot.download(message.document, destination=upload_file_path)
-            logger.info(f"File downloaded successfully to {file_path}")
+            async def _download_file():
+                logger.info("[TIMEOUT-FIX] Inside _download_file task")
+                try:
+                    file_path = await bot.download(message.document, destination=upload_file_path)
+                    logger.info(f"[TIMEOUT-FIX] File downloaded successfully to {file_path}")
+                    return file_path
+                except Exception as inner_e:
+                    logger.error(f"[TIMEOUT-FIX] Error in download task: {inner_e}")
+                    raise
+            
+            # Execute the download in a proper task context
+            logger.info("[TIMEOUT-FIX] Creating task for file download")
+            file_path = await asyncio.create_task(_download_file())
+            logger.info(f"[TIMEOUT-FIX] Download task completed: {file_path}")
             
             # Verify file was downloaded correctly
             if os.path.exists(upload_file_path):
@@ -453,7 +465,7 @@ async def handle_document(message: Message):
                 # If we're in local mode without a webhook, just send the file directly
                 if not settings.WEBHOOK_HOST:
                     logger.info("Running in local mode, sending file directly")
-                    await status_message.delete()
+                    await asyncio.create_task(status_message.delete())
                     
                     # First send insights as HTML message
                     logger.info("Sending insights message")
@@ -469,10 +481,24 @@ async def handle_document(message: Message):
                         message,
                         "Отправляю полный отчет..."
                     )
-                    await asyncio.create_task(message.answer_document(
-                        FSInputFile(report_file_path),
-                        caption="Ваш полный отчет Chat X-Ray готов. Этот файл будет доступен в течение 72 часов."
-                    ))
+                    
+                    # Use safe task for document sending
+                    async def _send_document():
+                        logger.info("[TIMEOUT-FIX] Inside _send_document task")
+                        try:
+                            result = await message.answer_document(
+                                FSInputFile(report_file_path),
+                                caption="Ваш полный отчет Chat X-Ray готов. Этот файл будет доступен в течение 72 часов."
+                            )
+                            logger.info("[TIMEOUT-FIX] Document sent successfully")
+                            return result
+                        except Exception as inner_e:
+                            logger.error(f"[TIMEOUT-FIX] Error in document sending task: {inner_e}")
+                            return None
+                    
+                    logger.info("[TIMEOUT-FIX] Creating task for document sending")
+                    await asyncio.create_task(_send_document())
+                    logger.info("[TIMEOUT-FIX] Document sending task completed")
                 else:
                     # In production with webhook, send insights and a link
                     logger.info("Running in webhook mode, sending link to report")
