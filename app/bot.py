@@ -603,22 +603,22 @@ async def main():
     # Start the scheduler
     scheduler.start()
     
-    # First, delete any existing webhook to avoid conflicts
-    try:
-        # Create a task for webhook deletion
-        await asyncio.create_task(bot.delete_webhook(drop_pending_updates=True))
-    except Exception as e:
-        logger.error(f"Error deleting webhook: {e}")
+    # Check if we're running on Render or have a webhook URL configured
+    is_webhook_mode = bool(settings.WEBHOOK_URL or os.environ.get("PORT") or os.environ.get("RENDER_EXTERNAL_URL"))
     
-    # If webhook URL is provided or we're on Render (PORT env var is set), use webhook mode
-    if settings.WEBHOOK_URL or os.environ.get("PORT"):
+    logger.info(f"Bot startup mode: {'webhook' if is_webhook_mode else 'polling'}")
+    
+    if is_webhook_mode:
+        # We're in webhook mode - make sure webhook is properly set
+        logger.info(f"Starting in webhook mode")
+        
         # If WEBHOOK_URL is not set but we're on Render, construct it
         if not settings.WEBHOOK_URL and os.environ.get("RENDER_EXTERNAL_URL"):
             webhook_host = os.environ.get("RENDER_EXTERNAL_URL")
             settings.WEBHOOK_URL = f"{webhook_host}{settings.WEBHOOK_PATH}"
             logger.info(f"Running on Render.com, constructed webhook URL: {settings.WEBHOOK_URL}")
             
-        logger.info(f"Starting in webhook mode with URL: {settings.WEBHOOK_URL}")
+        logger.info(f"Webhook URL: {settings.WEBHOOK_URL}")
         logger.info(f"Web server will listen on {settings.HOST}:{settings.PORT}")
         
         # Create web application
@@ -698,19 +698,46 @@ async def main():
         # Setup reports static directory
         app.router.add_static("/reports/", path=str(settings.REPORT_DIR), name="reports")
         
-        # Set webhook with drop_pending_updates=True to avoid conflicts
+        # First, delete any existing webhook to avoid conflicts
         try:
-            # Create a task for setting webhook
-            await asyncio.create_task(bot.set_webhook(url=settings.WEBHOOK_URL, drop_pending_updates=True))
-            logger.info(f"Webhook set at: {settings.WEBHOOK_URL}")
+            # Check current webhook status
+            webhook_info = await bot.get_webhook_info()
+            current_url = webhook_info.url if webhook_info else None
+            
+            if current_url != settings.WEBHOOK_URL:
+                # Only delete and reset if the webhook URL has changed
+                logger.info(f"Current webhook URL ({current_url}) differs from configured URL ({settings.WEBHOOK_URL})")
+                logger.info("Deleting current webhook...")
+                await bot.delete_webhook(drop_pending_updates=True)
+                logger.info("Setting new webhook...")
+                await bot.set_webhook(url=settings.WEBHOOK_URL, drop_pending_updates=True)
+                logger.info(f"Webhook set at: {settings.WEBHOOK_URL}")
+            else:
+                logger.info(f"Webhook already correctly set to: {settings.WEBHOOK_URL}")
         except Exception as e:
-            logger.error(f"Error setting webhook: {e}")
+            logger.error(f"Error managing webhook: {e}")
+            # Try one more time with a simple approach
+            try:
+                await bot.set_webhook(url=settings.WEBHOOK_URL, drop_pending_updates=True)
+                logger.info(f"Webhook set (retry) at: {settings.WEBHOOK_URL}")
+            except Exception as e2:
+                logger.error(f"Second attempt to set webhook failed: {e2}")
         
         # Return the app to be run by the caller
         return app
     else:
         # Use polling mode only for local development
         logger.info("Starting in polling mode as WEBHOOK_URL is not set and not running on Render")
+        # First check if there's a webhook set and delete it
+        try:
+            webhook_info = await bot.get_webhook_info()
+            if webhook_info and webhook_info.url:
+                logger.warning(f"Found existing webhook: {webhook_info.url} - deleting it for polling mode")
+                await bot.delete_webhook(drop_pending_updates=True)
+                logger.info("Webhook deleted, now starting polling")
+        except Exception as e:
+            logger.error(f"Error checking/deleting webhook before polling: {e}")
+            
         await dp.start_polling(bot, drop_pending_updates=True)
 
 
