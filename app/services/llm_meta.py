@@ -148,7 +148,7 @@ META_PROMPT = """
 1. ОБЯЗАТЕЛЬНО ПИШИТЕ ВЕСЬ ТЕКСТ ОТЧЕТА НА РУССКОМ ЯЗЫКЕ БЕЗ ИСКЛЮЧЕНИЙ.
 2. Используйте ТОЧНЫЕ количественные показатели из данных для создания всех графиков и диаграмм.
 3. Включите МИНИМУМ 30 содержательных цитат с подробным анализом.
-4. Общий объём отчёта — не менее 4 000 слов (≈ 4+ полноценных страниц A4).
+4. Общий объём отчёта — не менее 3 500 слов (≈ 4 страниц A4).
 5. Сделайте отчёт МАКСИМАЛЬНО ГЛУБОКИМ и ПРОНИЦАТЕЛЬНЫМ, как если бы его подготовил ведущий эксперт в психологии отношений.
 6. ВСЕ ГРАФИКИ ДОЛЖНЫ БЫТЬ СОЗДАНЫ на основе РЕАЛЬНЫХ ДАННЫХ анализа и находиться прямо в HTML (SVG/CSS/JS).
 7. ОБЯЗАТЕЛЬНО включите ВСЕ цитаты, которые были предоставлены в дополнительных данных, даже если они отсутствуют в основной выборке.
@@ -263,21 +263,43 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
                 {quotes_json}
                 """
             
-            # Call the OpenAI API with GPT-4 Turbo
-            response = await client.chat.completions.create(
-                model=settings.META_MODEL,
-                messages=[
-                    {"role": "system", "content": META_PROMPT},
-                    {"role": "user", "content": f"Создайте психологический отчет на РУССКОМ языке на основе предоставленных данных:\n\n{results_json}\n\n{quotes_prompt}"}
-                ],
-                temperature=0.7,
-                max_tokens=6000,
-                n=1
-            )
-            
-            # Extract the response content
-            html_content = response.choices[0].message.content
-            tokens_used_meta = response.usage.total_tokens if hasattr(response, "usage") and response.usage else 0
+            async def _gpt_call(section_hint: str, include_doctype: bool) -> Tuple[str, int]:
+                """Helper to call GPT with a hint which sections to produce."""
+                sys_prompt = META_PROMPT + f"\nОГРАНИЧЕНИЕ: Сгенерируй ТОЛЬКО {section_hint}."
+                if not include_doctype:
+                    sys_prompt += " Не добавляй <!DOCTYPE html> и теги <html> <head>. Начни сразу с содержимого <body>."
+
+                resp = await client.chat.completions.create(
+                    model=settings.META_MODEL,
+                    messages=[
+                        {"role": "system", "content": sys_prompt},
+                        {"role": "user", "content": f"На основе данных:\n\n{results_json}\n\n{quotes_prompt}"}
+                    ],
+                    temperature=0.7,
+                    max_tokens=4096,
+                    n=1
+                )
+                content = resp.choices[0].message.content
+                t_used = resp.usage.total_tokens if hasattr(resp, "usage") and resp.usage else 0
+                return content, t_used
+
+            # --- First half (sections 1-4) ---
+            html_part1, tokens1 = await _gpt_call("разделы 1-4 (Обзор, Паттерны, Эмоции, Токсичные взаимодействия)", True)
+
+            # --- Second half (sections 5-8 + графика) ---
+            html_part2_raw, tokens2 = await _gpt_call("разделы 5-8 (Цитаты, Инсайты, Рекомендации, Количественный анализ и графики)", False)
+
+            # Merge: insert part2 before </body>
+            import re
+            body_close_re = re.compile(r"</body>\s*</html>\s*$", re.IGNORECASE | re.DOTALL)
+            match = body_close_re.search(html_part1)
+            if match:
+                html_content = body_close_re.sub(html_part2_raw + match.group(0), html_part1)
+            else:
+                # Fallback – just concatenate
+                html_content = html_part1 + html_part2_raw
+
+            tokens_used_meta = tokens1 + tokens2
             
             # Strip any leading non-HTML text the model might have added (e.g. "Конечно, вот отчёт:")
             import re
@@ -494,7 +516,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
                             {"role": "user", "content": f"Создайте психологический отчет на РУССКОМ языке на основе этой выборки сообщений:\n\n{results_json}\n\n{quotes_prompt}"}
                         ],
                         temperature=0.7,
-                        max_tokens=6000,
+                        max_tokens=4096,
                         n=1
                     )
                     
