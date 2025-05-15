@@ -260,7 +260,68 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
         return summary
 
     metrics_summary = compute_metrics_summary(results)
-    metrics_json = json.dumps(metrics_summary, ensure_ascii=False)
+    # ---- Additional datasets for robust SVG графики ----
+    from datetime import datetime
+
+    def compute_timeline(msgs, bins: int = 24):
+        """Compute binned averages of key metrics along the dialogue timeline."""
+        if not msgs:
+            return []
+        total = len(msgs)
+        bin_size = max(1, total // bins)
+        timeline = []
+        for start_idx in range(0, total, bin_size):
+            segment = msgs[start_idx:start_idx + bin_size]
+            ts_start = segment[0].get("timestamp") if segment else None
+            ts_end = segment[-1].get("timestamp") if segment else None
+            per_author = defaultdict(lambda: defaultdict(list))
+            for m in segment:
+                author = m.get("author", "Unknown")
+                for fld in [
+                    "sentiment_score",
+                    "toxicity",
+                    "manipulation",
+                    "empathy",
+                    "assertiveness",
+                    "emotion_intensity",
+                ]:
+                    val = m.get(fld)
+                    if isinstance(val, (int, float)):
+                        per_author[author][fld].append(val)
+            entry = {
+                "bin": len(timeline) + 1,
+                "timestamp_start": ts_start,
+                "timestamp_end": ts_end,
+                "authors": {
+                    a: {k: (sum(v)/len(v) if v else 0) for k, v in adict.items()}
+                    for a, adict in per_author.items()
+                }
+            }
+            timeline.append(entry)
+            if len(timeline) >= bins:
+                break
+        return timeline
+
+    def compute_pattern_distribution(msgs):
+        """Count occurrences of communication patterns per author."""
+        dist = defaultdict(lambda: defaultdict(int))
+        for m in msgs:
+            author = m.get("author", "Unknown")
+            pattern = m.get("communication_pattern")
+            if pattern:
+                dist[author][pattern] += 1
+        return dist
+
+    timeline_data = compute_timeline(results, bins=24)
+    pattern_distribution = compute_pattern_distribution(results)
+
+    data_pack = {
+        "agg_metrics": metrics_summary,
+        "timeline": timeline_data,
+        "pattern_distribution": pattern_distribution,
+    }
+
+    metrics_json = json.dumps(data_pack, ensure_ascii=False)
     
     # Start with an optimistic sampling approach
     max_context_tokens = 110000  # Leave room for prompt and response
