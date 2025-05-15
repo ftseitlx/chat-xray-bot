@@ -397,7 +397,7 @@ async def handle_document(message: Message):
                     parse_mode=ParseMode.HTML,
                 )
 
-        analysis_results = await process_chunks(chunks, progress_callback=_progress_callback)
+        analysis_results, primary_tokens = await process_chunks(chunks, progress_callback=_progress_callback)
         logger.info(f"Successfully processed {len(analysis_results)} chunk results")
         
         # Generate meta report with GPT-4
@@ -405,7 +405,7 @@ async def handle_document(message: Message):
         await safe_edit_message(status_message, "✨ Создаю психологические выводы и генерирую отчет...")
         
         try:
-            html_content = await generate_meta_report(analysis_results)
+            html_content, meta_tokens = await generate_meta_report(analysis_results)
             logger.info("Successfully generated meta report HTML content")
             
             # Save HTML content to file
@@ -422,7 +422,7 @@ async def handle_document(message: Message):
             logger.info(f"Report URL: {report_url}")
             
             # Calculate and log approximate cost
-            approx_cost = (num_chunks * 0.0005) + 0.01  # $0.0005 per chunk for GPT-3.5 + $0.01 for GPT-4 Turbo
+            approx_cost = (primary_tokens * settings.GPT35_COST_PER_TOKEN) + (meta_tokens * settings.GPT4_TURBO_COST_PER_TOKEN)
             await log_cost(message.from_user.id, num_chunks, approx_cost)
             
             # Extract insights for Telegram message
@@ -622,6 +622,7 @@ async def main():
         SimpleRequestHandler(dp, bot).register(app, path=settings.WEBHOOK_PATH)
 
         # Extra endpoints
+        app.router.add_get("/", health_check)
         app.router.add_get("/health", health_check)
         app.router.add_static(
             "/reports/", path=str(settings.REPORT_DIR), name="reports"

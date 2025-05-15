@@ -1,7 +1,7 @@
 import json
 import logging
 import time
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 import openai
 from openai import AsyncOpenAI
@@ -156,7 +156,7 @@ META_PROMPT = """
 """
 
 
-async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int = 3) -> str:
+async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int = 3) -> Tuple[str, int]:
     """
     Generate a meta report from the analysis results using GPT-4 Turbo.
     
@@ -165,7 +165,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
         max_retries: Maximum number of retries on rate limit errors
         
     Returns:
-        HTML string for the report
+        Tuple containing HTML string for the report and tokens used for the report
     """
     # Calculate approximate token count for the dataset
     def estimate_tokens(data_str: str) -> int:
@@ -275,6 +275,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
             
             # Extract the response content
             html_content = response.choices[0].message.content
+            tokens_used_meta = response.usage.total_tokens if hasattr(response, "usage") and response.usage else 0
             
             # Strip any leading non-HTML text the model might have added (e.g. "Конечно, вот отчёт:")
             import re
@@ -407,7 +408,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
                     """
                     html_content = re.sub(body_pattern, lambda m: m.group(0) + sampling_notice, html_content)
             
-            return html_content
+            return html_content, tokens_used_meta
             
         except openai.RateLimitError as e:
             retry_count += 1
@@ -426,7 +427,37 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
                     logger.info(f"Финальная попытка с уменьшенной выборкой из {len(results_to_process)} сообщений")
             else:
                 logger.error("Достигнуто максимальное количество попыток. Возвращаем шаблон ошибки.")
-                raise
+                return f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>Chat X-Ray: Ошибка отчета</title>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }}
+                        h1 {{ color: #e74c3c; text-align: center; }}
+                        .error {{ background-color: #f8d7da; padding: 20px; border-radius: 5px; }}
+                        .suggestion {{ background-color: #e8f4fd; padding: 15px; border-radius: 5px; margin-top: 20px; }}
+                    </style>
+                </head>
+                <body>
+                    <h1>Ошибка при создании отчета</h1>
+                    <div class="error">
+                        <p>При анализе вашего чата произошла ошибка:</p>
+                        <p><strong>{str(e)}</strong></p>
+                        <p>Пожалуйста, попробуйте еще раз позже или обратитесь в службу поддержки, если проблема не исчезнет.</p>
+                    </div>
+                    <div class="suggestion">
+                        <p><strong>Возможные решения:</strong></p>
+                        <ul>
+                            <li>Загрузите файл меньшего размера</li>
+                            <li>Убедитесь, что файл содержит текстовые сообщения в правильном формате</li>
+                            <li>Попробуйте снова через несколько минут</li>
+                        </ul>
+                    </div>
+                </body>
+                </html>
+                """, 0
                 
         except openai.OpenAIError as e:
             logger.error(f"OpenAI API error in meta analysis: {e}")
@@ -465,6 +496,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
                     )
                     
                     html_content = response.choices[0].message.content
+                    tokens_used_meta = response.usage.total_tokens if hasattr(response, "usage") and response.usage else 0
                     
                     # Add sampling disclaimer
                     import re
@@ -480,7 +512,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
                         """
                         html_content = re.sub(body_pattern, lambda m: m.group(0) + sampling_notice, html_content)
                         
-                    return html_content
+                    return html_content, tokens_used_meta
                 except Exception as inner_error:
                     logger.error(f"Error in retry with minimal sample: {inner_error}")
             
@@ -515,4 +547,4 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
                 </div>
             </body>
             </html>
-            """ 
+            """, 0 

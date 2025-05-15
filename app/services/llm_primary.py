@@ -3,7 +3,7 @@ import logging
 import time
 import asyncio
 import os
-from typing import List, Dict, Any, Callable, Awaitable, Optional
+from typing import List, Dict, Any, Callable, Awaitable, Optional, Tuple
 from pathlib import Path
 
 import openai
@@ -72,7 +72,7 @@ PRIMARY_PROMPT = """
 Выведите результат в формате JSON. Обязательно анализируйте количественные параметры максимально точно, так как они будут использованы для создания графиков и визуализаций.
 """
 
-async def process_chunk(chunk: List[Dict[str, Any]], max_retries: int = 3) -> List[Dict[str, Any]]:
+async def process_chunk(chunk: List[Dict[str, Any]], max_retries: int = 3) -> Tuple[List[Dict[str, Any]], int]:
     """
     Process a single chunk of messages using GPT-3.5-turbo.
     
@@ -81,7 +81,7 @@ async def process_chunk(chunk: List[Dict[str, Any]], max_retries: int = 3) -> Li
         max_retries: Maximum number of retries on rate limit errors
         
     Returns:
-        List of processed message dictionaries with analysis
+        Tuple containing the list of processed message dictionaries with analysis and the number of tokens used
     """
     # Format the chat log for the model
     chat_log = "\n\n".join([f"{msg['raw']}" for msg in chunk])
@@ -106,6 +106,7 @@ async def process_chunk(chunk: List[Dict[str, Any]], max_retries: int = 3) -> Li
             
             # Extract the response content
             result_text = response.choices[0].message.content
+            tokens_used = response.usage.total_tokens if hasattr(response, "usage") and response.usage else 0
             
             # Parse the JSON response
             try:
@@ -113,12 +114,12 @@ async def process_chunk(chunk: List[Dict[str, Any]], max_retries: int = 3) -> Li
                 
                 # Check if we got a list as expected
                 if "messages" in result_json:
-                    return result_json["messages"]
+                    return result_json["messages"], tokens_used
                 elif isinstance(result_json, list):
-                    return result_json
+                    return result_json, tokens_used
                 else:
                     # Try to adapt the format if it's not as expected
-                    return [result_json]
+                    return [result_json], tokens_used
                     
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse JSON from GPT-3.5 response: {e}")
@@ -129,12 +130,12 @@ async def process_chunk(chunk: List[Dict[str, Any]], max_retries: int = 3) -> Li
                 json_objects = re.findall(r'\{[^{}]*\}', result_text)
                 if json_objects:
                     try:
-                        return [json.loads(obj) for obj in json_objects]
+                        return [json.loads(obj) for obj in json_objects], tokens_used
                     except:
                         pass
                 
                 # Return a basic structure if JSON parsing fails
-                return [{"error": "Failed to parse model output", "raw_input": msg["raw"]} for msg in chunk]
+                return [{"error": "Failed to parse model output", "raw_input": msg["raw"]} for msg in chunk], tokens_used
         
         except openai.RateLimitError as e:
             retry_count += 1
@@ -146,18 +147,18 @@ async def process_chunk(chunk: List[Dict[str, Any]], max_retries: int = 3) -> Li
                 backoff_time *= 2  # Exponential backoff
             else:
                 logger.error("Max retries reached. Returning error structure.")
-                return [{"error": str(e), "raw_input": msg["raw"]} for msg in chunk]
+                return [{"error": str(e), "raw_input": msg["raw"]} for msg in chunk], 0
                 
         except openai.OpenAIError as e:
             logger.error(f"OpenAI API error: {e}")
             # Return an error object
-            return [{"error": str(e), "raw_input": msg["raw"]} for msg in chunk]
+            return [{"error": str(e), "raw_input": msg["raw"]} for msg in chunk], 0
 
 
 async def process_chunks(
     chunks: List[List[Dict[str, Any]]],
     progress_callback: Optional[Callable[[int, int], Awaitable[None]]] = None,
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], int]:
     """
     Process all chunks of messages in parallel and combine the results.
     
@@ -166,7 +167,7 @@ async def process_chunks(
         progress_callback: Optional callback function to report progress
         
     Returns:
-        List of all processed message dictionaries with analysis
+        Tuple containing the list of all processed message dictionaries with analysis and the total number of tokens used
     """
     # Use concurrency limit from settings
     concurrency_limit = settings.OPENAI_CONCURRENCY_LIMIT
@@ -178,14 +179,14 @@ async def process_chunks(
         """Process a chunk with semaphore to limit concurrency"""
         async with semaphore:
             logger.info(f"Processing chunk {i+1}/{len(chunks)}")
-            result = await process_chunk(chunk)
+            result, tokens_used = await process_chunk(chunk)
             # Report progress if callback provided
             if progress_callback:
                 try:
                     await progress_callback(i + 1, len(chunks))
                 except Exception as cb_err:
                     logger.warning(f"Progress callback error: {cb_err}")
-            return result
+            return result, tokens_used
     
     # Create tasks for all chunks
     tasks = [process_with_semaphore(i, chunk) for i, chunk in enumerate(chunks)]
@@ -196,15 +197,18 @@ async def process_chunks(
     
     # Combine results, handling any exceptions that occurred
     results = []
-    for i, result in enumerate(chunk_results):
-        if isinstance(result, Exception):
-            logger.error(f"Error processing chunk {i+1}: {result}")
+    total_tokens = 0
+    for i, res in enumerate(chunk_results):
+        if isinstance(res, Exception):
+            logger.error(f"Error processing chunk {i+1}: {res}")
             # Add error placeholders for this chunk
-            results.extend([{"error": str(result), "raw_input": msg["raw"]} for msg in chunks[i]])
+            results.extend([{"error": str(res), "raw_input": msg["raw"]} for msg in chunks[i]])
         else:
-            results.extend(result)
+            chunk_result, tokens_used = res
+            results.extend(chunk_result)
+            total_tokens += tokens_used
     
-    return results 
+    return results, total_tokens
 
 def extract_messages_from_text(file_path: Path) -> List[Dict[str, Any]]:
     logger.info(f"→ START extract_messages_from_text ({file_path})")
