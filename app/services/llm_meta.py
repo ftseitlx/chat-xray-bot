@@ -283,10 +283,11 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
             if leading_html_match:
                 html_content = leading_html_match.group(1).lstrip()
 
-            # Basic validation - check if it looks like HTML
-            if not html_content.strip().startswith("<!DOCTYPE html>") and not html_content.strip().startswith("<html"):
-                # Try to extract HTML if the model included other text
-                html_match = re.search(r'(<html.*?>.*?</html>)', html_content, re.DOTALL)
+            # Basic validation - check if it looks like HTML (case-insensitive)
+            _html_start = html_content.lstrip()[:40].lower()
+            if not (_html_start.startswith("<!doctype html") or _html_start.startswith("<html")):
+                # Try to extract an HTML block if the model included additional text before/after
+                html_match = re.search(r'(<html[\s\S]*?</html>)', html_content, re.IGNORECASE)
                 if html_match:
                     html_content = html_match.group(1)
                 else:
