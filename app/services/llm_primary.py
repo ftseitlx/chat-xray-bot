@@ -4,6 +4,7 @@ import time
 import asyncio
 import os
 from typing import List, Dict, Any, Callable, Awaitable, Optional
+from pathlib import Path
 
 import openai
 from openai import AsyncOpenAI
@@ -204,3 +205,16 @@ async def process_chunks(
             results.extend(result)
     
     return results 
+
+def extract_messages_from_text(file_path: Path) -> List[Dict[str, Any]]:
+    logger.info(f"→ START extract_messages_from_text ({file_path})")
+    start_ts = time.time()
+    try:
+        ...
+        logger.info(f"extract_messages_from_text: finished patterns, got {len(messages)} msgs")
+        ...
+        logger.info(f"← END extract_messages_from_text — {len(messages)} msgs, elapsed {time.time()-start_ts:.1f}s")
+        return messages
+    except Exception as e:
+        logger.exception("extract_messages_from_text FAILED")
+        raise 

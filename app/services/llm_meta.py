@@ -269,17 +269,22 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
                     {"role": "user", "content": f"Создайте психологический отчет на РУССКОМ языке на основе предоставленных данных:\n\n{results_json}\n\n{quotes_prompt}"}
                 ],
                 temperature=0.7,
-                max_tokens=4000,  # GPT-4 Turbo allows for larger response sizes
+                max_tokens=4096,
                 n=1
             )
             
             # Extract the response content
             html_content = response.choices[0].message.content
             
+            # Strip any leading non-HTML text the model might have added (e.g. "Конечно, вот отчёт:")
+            import re
+            leading_html_match = re.search(r'(<!DOCTYPE html[\s\S]*|<html[\s\S]*)', html_content, re.IGNORECASE)
+            if leading_html_match:
+                html_content = leading_html_match.group(1).lstrip()
+
             # Basic validation - check if it looks like HTML
             if not html_content.strip().startswith("<!DOCTYPE html>") and not html_content.strip().startswith("<html"):
                 # Try to extract HTML if the model included other text
-                import re
                 html_match = re.search(r'(<html.*?>.*?</html>)', html_content, re.DOTALL)
                 if html_match:
                     html_content = html_match.group(1)
@@ -455,7 +460,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
                             {"role": "user", "content": f"Создайте психологический отчет на РУССКОМ языке на основе этой выборки сообщений:\n\n{results_json}\n\n{quotes_prompt}"}
                         ],
                         temperature=0.7,
-                        max_tokens=4000,
+                        max_tokens=4096,
                         n=1
                     )
                     
