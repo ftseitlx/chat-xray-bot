@@ -534,14 +534,30 @@ async def health_check(request):
 
 
 async def main():
-    # Setup routers
+    """Entry-point coroutine.
+    Sets up dispatcher, bot, scheduler and either starts webhook-based aiohttp
+    application or long-polling depending on environment variables."""
+
+    global bot  # we assigned a forward declaration at module level
+
+    # -------------------------------------------------
+    # 1. Create Bot *inside* the running event-loop
+    # -------------------------------------------------
+    bot = Bot(
+        token=settings.BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
+
+    # -------------------------------------------------
+    # 2. Register routers
+    # -------------------------------------------------
     dp.include_router(main_router)
     dp.include_router(upload_router)
-    
-    # Setup scheduler for cleanup tasks
+
+    # -------------------------------------------------
+    # 3. Start background scheduler for cleanup
+    # -------------------------------------------------
     scheduler = AsyncIOScheduler()
-    
-    # Schedule cleanup tasks
     scheduler.add_job(
         cleanup.clean_old_uploads,
         "interval",
@@ -554,168 +570,76 @@ async def main():
         hours=6,
         kwargs={"hours": settings.REPORT_RETENTION_HOURS},
     )
-    
-    # Start the scheduler
     scheduler.start()
-    
-    # Check if we're running on Render or have a webhook URL configured
-    is_webhook_mode = bool(settings.WEBHOOK_URL or os.environ.get("PORT") or os.environ.get("RENDER_EXTERNAL_URL"))
-    
-    logger.info(f"Bot startup mode: {'webhook' if is_webhook_mode else 'polling'}")
-    
-    if is_webhook_mode:
-        # We're in webhook mode - make sure webhook is properly set
-        logger.info(f"Starting in webhook mode")
-        
-        # If WEBHOOK_URL is not set but we're on Render, construct it
-        if not settings.WEBHOOK_URL and os.environ.get("RENDER_EXTERNAL_URL"):
-            webhook_host = os.environ.get("RENDER_EXTERNAL_URL")
-            settings.WEBHOOK_URL = f"{webhook_host}{settings.WEBHOOK_PATH}"
-            logger.info(f"Running on Render.com, constructed webhook URL: {settings.WEBHOOK_URL}")
-            
-        logger.info(f"Webhook URL: {settings.WEBHOOK_URL}")
-        logger.info(f"Web server will listen on {settings.HOST}:{settings.PORT}")
-        
-        # Create web application
-        app = web.Application()
-        
-        # Define a custom webhook handler function that properly handles tasks
-        async def handle_webhook(request):
-            """Telegram webhook endpoint"""
-            logger.info("[TIMEOUT-FIX] Webhook handler received request")
-            try:
-                update_data = await request.json()
-            except Exception as e:
-                logger.error(f"[TIMEOUT-FIX] Failed to parse webhook JSON: {e}", exc_info=True)
-                if settings.SENTRY_DSN:
-                    sentry_sdk.capture_exception(e)
-                # Acknowledge to Telegram anyway to avoid repeated delivery
-                return web.json_response({"ok": True})
 
-            # Spawn background task to process update
-            asyncio.create_task(process_update(update_data))
-            return web.json_response({"ok": True})
-        
-        # Function to process updates in a separate task
-        async def process_update(update_data):
-            logger.info(f"[TIMEOUT-FIX] Process update started for update ID: {update_data.get('update_id')}")
-            try:
-                # Create a new task context for processing the update
-                async def _process():
-                    logger.info("[TIMEOUT-FIX] Inside _process task")
-                    try:
-                        # Let the dispatcher process the update
-                        logger.info("[TIMEOUT-FIX] Feeding update to dispatcher")
-                        await dp.feed_raw_update(bot=bot, update=update_data)
-                        logger.info("[TIMEOUT-FIX] Feed raw update completed")
-                    except Exception as inner_e:
-                        logger.error(f"[TIMEOUT-FIX] Error in update processing: {inner_e}")
-                        if settings.SENTRY_DSN:
-                            sentry_sdk.capture_exception(inner_e)
-                
-                # Run the processing in a proper task context
-                logger.info("[TIMEOUT-FIX] Creating task for _process")
-                task_result = await asyncio.create_task(_process())
-                logger.info("[TIMEOUT-FIX] _process task completed")
-                return task_result
-            except Exception as e:
-                logger.error(f"[TIMEOUT-FIX] Error creating process task: {e}")
-                if settings.SENTRY_DSN:
-                    sentry_sdk.capture_exception(e)
-        
-        # Register the custom webhook handler
-        app.router.add_post(settings.WEBHOOK_PATH, handle_webhook)
-        
-        # Setup health check endpoint
+    # -------------------------------------------------
+    # 4. Determine operation mode (webhook vs polling)
+    # -------------------------------------------------
+    is_webhook_mode = bool(
+        settings.WEBHOOK_URL or os.environ.get("PORT") or os.environ.get("RENDER_EXTERNAL_URL")
+    )
+
+    logger.info(f"Bot startup mode: {'webhook' if is_webhook_mode else 'polling'}")
+
+    # Build/adjust webhook URL dynamically when running on Render.com
+    if is_webhook_mode and not settings.WEBHOOK_URL and os.environ.get("RENDER_EXTERNAL_URL"):
+        settings.WEBHOOK_URL = f"{os.environ['RENDER_EXTERNAL_URL']}{settings.WEBHOOK_PATH}"
+        logger.info(f"Constructed webhook URL: {settings.WEBHOOK_URL}")
+
+    # -------------------------------------------------
+    # 4a. WEBHOOK MODE  – aiohttp web-server
+    # -------------------------------------------------
+    if is_webhook_mode:
+        # Tell Telegram to use the webhook
+        await bot.set_webhook(settings.WEBHOOK_URL, drop_pending_updates=True)
+
+        # Build aiohttp Application and register aiogram handler on given path
+        app = web.Application()
+
+        # Use Aiogram's built-in helper to register a proper request handler
+        SimpleRequestHandler(dp, bot).register(app, path=settings.WEBHOOK_PATH)
+
+        # Extra endpoints
         app.router.add_get("/health", health_check)
-        
-        # Setup reports static directory
-        app.router.add_static("/reports/", path=str(settings.REPORT_DIR), name="reports")
-        
-        # First, delete any existing webhook to avoid conflicts
-        try:
-            # Check current webhook status
-            webhook_info = await bot.get_webhook_info()
-            current_url = webhook_info.url if webhook_info else None
-            
-            if current_url != settings.WEBHOOK_URL:
-                # Only delete and reset if the webhook URL has changed
-                logger.info(f"Current webhook URL ({current_url}) differs from configured URL ({settings.WEBHOOK_URL})")
-                logger.info("Deleting current webhook...")
-                await bot.delete_webhook(drop_pending_updates=True)
-                logger.info("Setting new webhook...")
-                await bot.set_webhook(url=settings.WEBHOOK_URL, drop_pending_updates=True)
-                logger.info(f"Webhook set at: {settings.WEBHOOK_URL}")
-            else:
-                logger.info(f"Webhook already correctly set to: {settings.WEBHOOK_URL}")
-        except Exception as e:
-            logger.error(f"Error managing webhook: {e}")
-            # Try one more time with a simple approach
-            try:
-                await bot.set_webhook(url=settings.WEBHOOK_URL, drop_pending_updates=True)
-                logger.info(f"Webhook set (retry) at: {settings.WEBHOOK_URL}")
-            except Exception as e2:
-                logger.error(f"Second attempt to set webhook failed: {e2}")
-        
-        # Return the app to be run by the caller
-        return app
+        app.router.add_static(
+            "/reports/", path=str(settings.REPORT_DIR), name="reports"
+        )
+
+        # Launch web-server using the *current* event-loop.
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, host=settings.HOST, port=settings.PORT)
+        await site.start()
+        logger.info(f"Webhook server started on {settings.HOST}:{settings.PORT}")
+
+        # Block forever (until Ctrl-C / container stop)
+        await asyncio.Event().wait()
+
+    # -------------------------------------------------
+    # 4b. LONG-POLLING MODE
+    # -------------------------------------------------
     else:
-        # Use polling mode only for local development
-        logger.info("Starting in polling mode as WEBHOOK_URL is not set and not running on Render")
-        # First check if there's a webhook set and delete it
-        try:
-            webhook_info = await bot.get_webhook_info()
-            if webhook_info and webhook_info.url:
-                logger.warning(f"Found existing webhook: {webhook_info.url} - deleting it for polling mode")
-                await bot.delete_webhook(drop_pending_updates=True)
-                logger.info("Webhook deleted, now starting polling")
-        except Exception as e:
-            logger.error(f"Error checking/deleting webhook before polling: {e}")
-            
-        await dp.start_polling(bot, drop_pending_updates=True)
+        logger.info("Starting long-polling")
+        await bot.delete_webhook(drop_pending_updates=True)
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+
+    # -------------------------------------------------
+    # 5. Graceful shutdown  (falls through when poll/webhook exits)
+    # -------------------------------------------------
+    scheduler.shutdown(wait=False)
+    await bot.session.close()
 
 
 if __name__ == "__main__":
-    # Setup event loop with proper policy
-    if sys.platform == 'win32':
+    # On Windows use Selector loop for aiogram compatibility
+    if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    
-    # Create and activate a new event loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    # Initialise the global bot variable now that the loop is set
-    bot = Bot(
-        token=settings.BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
 
     try:
-        # Run the main function
-        app = loop.run_until_complete(main())
-        
-        # If we're in webhook mode, run the web app
-        if app:
-            web.run_app(app, host=settings.HOST, port=settings.PORT)
+        asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Bot stopped by user (Keyboard Interrupt)")
+        logger.info("Bot interrupted by user – shutting down…")
     except Exception as e:
-        logger.error(f"Error in main function: {e}")
+        logger.error(f"Unhandled exception in main(): {e}")
         if settings.SENTRY_DSN:
-            sentry_sdk.capture_exception(e)
-    finally:
-        # Clean up
-        tasks = asyncio.all_tasks(loop)
-        for task in tasks:
-            task.cancel()
-        
-        # Wait for all tasks to be cancelled
-        if tasks:
-            try:
-                loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
-            except asyncio.CancelledError:
-                pass
-        
-        # Close the loop
-        loop.close()
-        logger.info("Bot stopped") 
+            sentry_sdk.capture_exception(e) 
