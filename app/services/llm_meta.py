@@ -7,6 +7,11 @@ import openai
 from openai import AsyncOpenAI
 
 from app.config import settings
+from app.services.graphics import (
+    generate_sentiment_timeline_svg,
+    generate_radar_chart_svg,
+    generate_bar_chart_svg,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -597,6 +602,52 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
             if subs == 0:
                 html_content = msg_banner + html_content
             
+            # ---- Programmatically generate SVG charts to guarantee visuals ----
+            try:
+                svgs: List[str] = []
+
+                # 1. Sentiment timeline
+                svgs.append(generate_sentiment_timeline_svg(timeline_data))
+
+                # 2. Radar chart of core metrics per author
+                svgs.append(generate_radar_chart_svg(metrics_summary))
+
+                # 3. Bar chart of overall toxicity per author
+                toxicity_totals = {a: round(m.get("toxicity", 0), 3) for a, m in metrics_summary.items()}
+                svgs.append(generate_bar_chart_svg(toxicity_totals, "Средний уровень токсичности", chart_id="chart-3"))
+
+                # 4. Bar chart of manipulation per author
+                manip_totals = {a: round(m.get("manipulation", 0), 3) for a, m in metrics_summary.items()}
+                svgs.append(generate_bar_chart_svg(manip_totals, "Манипулятивность", chart_id="chart-4"))
+
+                # 5. Bar chart of assertiveness per author
+                assert_totals = {a: round(m.get("assertiveness", 0), 3) for a, m in metrics_summary.items()}
+                svgs.append(generate_bar_chart_svg(assert_totals, "Ассертивность", chart_id="chart-5"))
+
+                # 6. Bar chart of empathy per author
+                empathy_totals = {a: round(m.get("empathy", 0), 3) for a, m in metrics_summary.items()}
+                svgs.append(generate_bar_chart_svg(empathy_totals, "Эмпатия", chart_id="chart-6"))
+
+                # 7. Bar chart of horsemen overall (summing authors)
+                horsemen_totals = {}
+                for a, m in metrics_summary.items():
+                    for k, v in m.items():
+                        if k.startswith("horsemen_"):
+                            horsemen_totals[k.replace("horsemen_", "")] = horsemen_totals.get(k.replace("horsemen_", ""), 0) + v
+                if horsemen_totals:
+                    svgs.append(generate_bar_chart_svg(horsemen_totals, "Четыре всадника", chart_id="chart-7"))
+
+                # Replace placeholder <p class="chart-placeholder"> elements sequentially
+                for svg in svgs:
+                    placeholder_idx = html_content.find("class=\"chart-placeholder\"")
+                    if placeholder_idx == -1:
+                        break
+                    # Replace entire placeholder paragraph tag
+                    import re as _re
+                    html_content = _re.sub(r'<p class="chart-placeholder">[\s\S]*?</p>', svg, html_content, count=1)
+            except Exception as gerr:
+                logger.warning(f"Graphic injection failed: {gerr}")
+
             return html_content, tokens_used_meta
             
         except openai.RateLimitError as e:
