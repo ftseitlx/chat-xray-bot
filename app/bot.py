@@ -21,6 +21,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import re
 from bs4 import BeautifulSoup
 from aiogram.client.default import DefaultBotProperties
+from pathlib import Path
 
 from app.config import settings
 from app.utils import cleanup
@@ -251,10 +252,16 @@ async def handle_document(message: Message):
     # Log document details
     logger.info(f"[TIMEOUT-FIX] Document details: name={message.document.file_name}, size={message.document.file_size}, mime={message.document.mime_type}")
     
-    # Check MIME type - accept text/plain or text/html
-    valid_mime_types = ["text/plain", "text/html"]
-    if message.document.mime_type not in valid_mime_types:
-        logger.warning(f"[TIMEOUT-FIX] Invalid mime type: {message.document.mime_type} from user {message.from_user.id}")
+    # Check MIME type or fallback to file extension for Telegram exports, which often lack correct MIME
+    valid_mime_types = ["text/plain", "text/html", "application/octet-stream"]
+    valid_extensions = [".txt", ".html", ".htm"]
+
+    file_extension = Path(message.document.file_name or "").suffix.lower()
+
+    if (message.document.mime_type not in valid_mime_types) and (file_extension not in valid_extensions):
+        logger.warning(
+            f"[TIMEOUT-FIX] Invalid file type: mime={message.document.mime_type}, ext={file_extension} from user {message.from_user.id}"
+        )
         await safe_send_message(
             message,
             "⚠️ Неверный формат файла. Пожалуйста, отправьте текстовый файл (.txt) или HTML-экспорт чата (.html)."

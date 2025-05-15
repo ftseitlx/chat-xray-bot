@@ -115,10 +115,42 @@ def extract_messages_from_html(file_path: Path) -> List[Dict[str, Any]]:
                 except Exception as e:
                     logger.warning(f"Error parsing message div: {e}")
         
-        # If we couldn't find any messages with the WhatsApp format, try a more generic approach
+        # --- NEW: Telegram Desktop HTML export support ---
+        if not messages:
+            telegram_divs = soup.find_all('div', class_=lambda c: c and 'message' in c.split())
+            if telegram_divs:
+                logger.info(f"Detected Telegram export with {len(telegram_divs)} message divs")
+                for td in telegram_divs:
+                    try:
+                        author_tag = td.find('div', class_='from_name')
+                        content_tag = td.find('div', class_='text')
+                        date_tag = td.find('div', class_=lambda c: c and 'date' in c.split())
+
+                        if not author_tag or not content_tag:
+                            continue  # Skip system/service messages
+
+                        author = author_tag.text.strip()
+                        content = content_tag.text.strip()
+
+                        # Telegram stores timestamp in title attribute of date div
+                        timestamp = ''
+                        if date_tag:
+                            timestamp = date_tag.get('title', date_tag.text.strip())
+
+                        raw_msg = f"[{timestamp}] {author}: {content}"
+                        messages.append({
+                            "raw": raw_msg,
+                            "author": author,
+                            "message": content,
+                            "timestamp": timestamp
+                        })
+                    except Exception as te:
+                        logger.warning(f"Error parsing Telegram message div: {te}")
+        
+        # If still no messages found, fall back to generic parsing
         if not messages:
             # Generic approach: find any message-like patterns in the HTML
-            logger.info("No WhatsApp format messages found, trying generic HTML parsing")
+            logger.info("No WhatsApp/Telegram format messages found, trying generic HTML parsing")
             
             # Remove scripts and styles to avoid parsing their content
             for script in soup(["script", "style"]):
