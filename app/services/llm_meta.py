@@ -328,9 +328,17 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
 
     metrics_json = json.dumps(data_pack, ensure_ascii=False)
     
-    # Start with an optimistic sampling approach
-    max_context_tokens = 110000  # Leave room for prompt and response
-    target_token_budget = 90000
+    # -------- Context window limits --------
+    # For GPT-4-Turbo (128 K) мы можем передавать ~90 К токенов данных,
+    # но для gpt-3.5-turbo-16k лимит всего ≈16 К. Чтобы избежать ошибок 400,
+    # динамически выбираем бюджет в зависимости от выбранной «быстрой» модели.
+
+    if "gpt-3.5" in getattr(settings, "FAST_META_MODEL", ""):  # 16k context
+        max_context_tokens = 15000
+        target_token_budget = 13000  # ~2k запас на промпт и ответ
+    else:
+        max_context_tokens = 110000  # Leave room for prompt and response
+        target_token_budget = 90000
 
     def strip_bulky_fields(msg_list):
         """Return a deep-copied list with heavy fields removed."""
