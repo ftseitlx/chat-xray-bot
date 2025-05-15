@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import List, Dict, Any
 from bs4 import BeautifulSoup
+import time  # added for timing logs
 
 from app.config import settings
 
@@ -186,12 +187,14 @@ def extract_messages_from_text(file_path: Path) -> List[Dict[str, Any]]:
     """
     Extract messages from a plain text chat file.
     
-    Args:
-        file_path: Path to the text chat file
-        
-    Returns:
-        List of message dictionaries
+    Added extra timing / diagnostic logging because this step was
+    suspected to hang in production.  The new logs clearly mark the
+    start, end and message count as well as elapsed seconds.
     """
+
+    logger.info(f"→ START extract_messages_from_text ({file_path})")
+    _ts_start = time.time()
+
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -257,11 +260,13 @@ def extract_messages_from_text(file_path: Path) -> List[Dict[str, Any]]:
             logger.error("Failed to extract any messages from the chat file.")
             raise ValueError("Could not parse chat format")
             
-        logger.info(f"Extracted {len(messages)} messages from the text file.")
+        logger.info(
+            f"← END extract_messages_from_text — {len(messages)} msgs, elapsed {time.time() - _ts_start:.1f}s"
+        )
         return messages
         
     except Exception as e:
-        logger.error(f"Error extracting messages from text: {e}")
+        logger.exception("extract_messages_from_text FAILED")
         raise
 
 def extract_messages(file_path: Path) -> List[Dict[str, Any]]:
