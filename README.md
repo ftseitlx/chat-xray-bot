@@ -111,4 +111,4 @@ MIT License
 
 ## Credits
 
-Developed by [Your Name/Company] 
+Developed by Felix
