@@ -49,11 +49,8 @@ if settings.SENTRY_DSN:
         traces_sample_rate=0.1,
     )
 
-# Initialize bot with aiogram 3.7+ syntax using DefaultBotProperties
-bot = Bot(
-    token=settings.BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-)
+# We'll instantiate the Bot later, after setting up the event loop (see __main__ block)
+bot: Bot | None = None
 dp = Dispatcher(storage=MemoryStorage())
 
 # Setup main router
@@ -683,10 +680,16 @@ if __name__ == "__main__":
     if sys.platform == 'win32':
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     
-    # Create a new event loop
+    # Create and activate a new event loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    
+
+    # Initialise the global bot variable now that the loop is set
+    bot = Bot(
+        token=settings.BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
+
     try:
         # Run the main function
         app = loop.run_until_complete(main())
