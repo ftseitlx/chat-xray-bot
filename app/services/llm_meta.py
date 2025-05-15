@@ -287,7 +287,28 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
             html_part1, tokens1 = await _gpt_call("разделы 1-4 (Обзор, Паттерны, Эмоции, Токсичные взаимодействия)", True)
 
             # --- Second half (sections 5-8 + графика) ---
-            html_part2_raw, tokens2 = await _gpt_call("разделы 5-8 (Цитаты, Инсайты, Рекомендации, Количественный анализ и графики)", False)
+            # Strengthen requirements for graphics in the second part
+            second_hint = (
+                "разделы 5-8 (Цитаты, Инсайты, Рекомендации, Количественный анализ) И ОБЯЗАТЕЛЬНО минимум 5 SVG графиков. "
+                "Каждый график должен иметь уникальный id вида 'chart-1', 'chart-2', ... и подпись. Не используй внешние библиотеки." 
+            )
+            html_part2_raw, tokens2 = await _gpt_call(second_hint, False)
+
+            # --- Inject additional CSS for better readability ---
+            def _inject_css(html: str) -> str:
+                import re
+                style_block = """
+                <style>
+                    body { font-size: 17px; line-height: 1.8; }
+                    h2 { font-size: 24px; margin-top: 40px; }
+                    svg text { font-family: Arial, sans-serif; font-size: 14px; }
+                </style>
+                """
+                head_match = re.search(r"<head[^>]*>", html, re.IGNORECASE)
+                if head_match:
+                    insert_pos = head_match.end()
+                    html = html[:insert_pos] + style_block + html[insert_pos:]
+                return html
 
             # Merge: insert part2 before </body>
             import re
@@ -298,6 +319,9 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
             else:
                 # Fallback – just concatenate
                 html_content = html_part1 + html_part2_raw
+
+            # Inject additional CSS for better readability
+            html_content = _inject_css(html_content)
 
             tokens_used_meta = tokens1 + tokens2
             
@@ -432,6 +456,19 @@ async def generate_meta_report(results: List[Dict[str, Any]], max_retries: int =
                     </div>
                     """
                     html_content = re.sub(body_pattern, lambda m: m.group(0) + sampling_notice, html_content)
+            
+            # --- Insert banner with total messages analysed ---
+            msg_banner = (
+                f"""
+                <div style=\"background-color:#e8f4fd;padding:12px;margin-bottom:20px;border-left:4px solid #3498db;\">
+                    Отчёт подготовлен после анализа <b>{len(results)}</b> сообщений обеих сторон.
+                </div>
+                """
+            )
+            body_tag_re = re.compile(r"<body[^>]*>", re.IGNORECASE)
+            html_content, subs = body_tag_re.subn(lambda m: m.group(0)+msg_banner, html_content, count=1)
+            if subs == 0:
+                html_content = msg_banner + html_content
             
             return html_content, tokens_used_meta
             
