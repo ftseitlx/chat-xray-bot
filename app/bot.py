@@ -653,41 +653,20 @@ async def main():
         
         # Define a custom webhook handler function that properly handles tasks
         async def handle_webhook(request):
-            # Return a success response immediately to prevent Telegram timeouts
-            # Create a task to process the update in the background
+            """Telegram webhook endpoint"""
             logger.info("[TIMEOUT-FIX] Webhook handler received request")
             try:
-                # Start a background task to get the update data without blocking the response
-                async def _process_webhook():
-                    logger.info("[TIMEOUT-FIX] Inside _process_webhook background task")
-                    try:
-                        # Get the update data from the request
-                        logger.info("[TIMEOUT-FIX] Getting JSON from request")
-                        update_data = await request.json()
-                        logger.info(f"[TIMEOUT-FIX] Received webhook update: {update_data.get('update_id')}")
-                        
-                        # Process the update in a separate task
-                        logger.info("[TIMEOUT-FIX] Creating task for process_update")
-                        asyncio.create_task(process_update(update_data))
-                        logger.info("[TIMEOUT-FIX] Task created for process_update - continuing without waiting")
-                    except Exception as inner_e:
-                        logger.error(f"[TIMEOUT-FIX] Error processing webhook data: {inner_e}")
-                        if settings.SENTRY_DSN:
-                            sentry_sdk.capture_exception(inner_e)
-                
-                # Start the processing task without awaiting it
-                logger.info("[TIMEOUT-FIX] Creating background task for _process_webhook")
-                asyncio.create_task(_process_webhook())
-                logger.info("[TIMEOUT-FIX] Background task created - returning response immediately")
-                
-                # Return success immediately
-                return web.Response(status=200, text='{"ok": true}', content_type='application/json')
+                update_data = await request.json()
             except Exception as e:
-                logger.error(f"[TIMEOUT-FIX] Critical error in webhook handler: {e}")
+                logger.error(f"[TIMEOUT-FIX] Failed to parse webhook JSON: {e}", exc_info=True)
                 if settings.SENTRY_DSN:
                     sentry_sdk.capture_exception(e)
-                # Still return success to Telegram to prevent retries
-                return web.Response(status=200, text='{"ok": true, "error_logged": true}', content_type='application/json')
+                # Acknowledge to Telegram anyway to avoid repeated delivery
+                return web.json_response({"ok": True})
+
+            # Spawn background task to process update
+            asyncio.create_task(process_update(update_data))
+            return web.json_response({"ok": True})
         
         # Function to process updates in a separate task
         async def process_update(update_data):
