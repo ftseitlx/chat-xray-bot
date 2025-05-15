@@ -355,6 +355,9 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
     # Ensure we operate with the cleaned, size-constrained data going forward
     results_to_process = results_to_process_clean
 
+    # Choose a cheaper/faster model for the less insight-heavy part of the report
+    fast_model = getattr(settings, "FAST_META_MODEL", "gpt-3.5-turbo-16k")
+
     retry_count = 0
     backoff_time = settings.RETRY_DELAY_SECONDS  # Start with configured delay
     
@@ -370,14 +373,14 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
                 {quotes_json}
                 """
             
-            async def _gpt_call(section_hint: str, include_doctype: bool) -> Tuple[str, int]:
+            async def _gpt_call(section_hint: str, include_doctype: bool, model_name: str = settings.META_MODEL) -> Tuple[str, int]:
                 """Helper to call GPT with a hint which sections to produce."""
                 sys_prompt = META_PROMPT + f"\nОГРАНИЧЕНИЕ: Сгенерируй ТОЛЬКО {section_hint}."
                 if not include_doctype:
                     sys_prompt += " Не добавляй <!DOCTYPE html> и теги <html> <head>. Начни сразу с содержимого <body>."
 
                 resp = await client.chat.completions.create(
-                    model=settings.META_MODEL,
+                    model=model_name,
                     messages=[
                         {"role": "system", "content": sys_prompt},
                         {
@@ -399,7 +402,11 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
                 return content, t_used
 
             # --- First half (sections 1-4) ---
-            html_part1, tokens1 = await _gpt_call("разделы 1-4 (Обзор ≥600 слов, Паттерны ≥500, Эмоции ≥500, Токсичные взаимодействия ≥300)", True)
+            html_part1, tokens1 = await _gpt_call(
+                "разделы 1-4 (Обзор ≥600 слов, Паттерны ≥500, Эмоции ≥500, Токсичные взаимодействия ≥300)",
+                True,
+                model_name=fast_model
+            )
 
             # --- Second half (sections 5-9 + графика) ---
             # Strengthen requirements for graphics in the second part
@@ -408,7 +415,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
                 "и ОБЯЗАТЕЛЬНО минимум 7 SVG графиков. Используй данные из AGG_METRICS, числа не выдумывай. "
                 "Каждый график должен иметь уникальный id вида 'chart-1', 'chart-2', ... и подпись. Не используй внешние библиотеки." 
             )
-            html_part2_raw, tokens2 = await _gpt_call(second_hint, False)
+            html_part2_raw, tokens2 = await _gpt_call(second_hint, False, model_name=settings.META_MODEL)
 
             # --- Inject additional CSS for better readability ---
             def _inject_css(html: str) -> str:
