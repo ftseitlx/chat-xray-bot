@@ -196,70 +196,73 @@ def extract_messages_from_text(file_path: Path) -> List[Dict[str, Any]]:
     _ts_start = time.time()
 
     try:
+        # --- Fast line-by-line parsing first to avoid catastrophic regex backtracking ---
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
-        
-        # Common patterns for chat exports (can be extended)
-        patterns = [
-            # WhatsApp pattern: "[DATE, TIME] AUTHOR: MESSAGE"
-            r'\[(?P<date>.*?), (?P<time>.*?)\] (?P<author>.*?): (?P<message>.*?)(?=\n\[|$)',
-            
-            # WhatsApp pattern: "DATE, TIME - AUTHOR: MESSAGE"
-            r'(?P<date>\d{2}/\d{2}/\d{4}|\d{2}\.\d{2}\.\d{4}), (?P<time>\d{2}:\d{2}) - (?P<author>.*?): (?P<message>.*?)(?=\n\d{2}[/\.]\d{2}|$)',
-            
-            # Discord pattern: "AUTHOR [DATE TIME] MESSAGE"
-            r'(?P<author>.*?) \[(?P<date>.*?) (?P<time>.*?)\] (?P<message>.*?)(?=\n\w|$)',
-            
-            # Generic pattern: just try to extract author and message
-            r'(?P<author>[^:]+): (?P<message>.+?)(?=\n\w|$)'
-        ]
-        
-        # Try each pattern until one works
-        messages = []
-        for pattern in patterns:
-            matches = re.finditer(pattern, content, re.DOTALL | re.MULTILINE)
-            messages = []
-            
-            for match in matches:
-                groups = match.groupdict()
-                raw_msg = match.group(0)
-                
-                message = {
-                    "raw": raw_msg,
-                    "author": groups.get("author", "Unknown"),
-                    "message": groups.get("message", ""),
-                    "timestamp": f"{groups.get('date', '')} {groups.get('time', '')}".strip()
-                }
-                
-                messages.append(message)
-            
-            # If we found messages, break out of the loop
-            if messages:
-                break
-        
-        # If no patterns matched, try a simple line-by-line approach
-        if not messages:
-            logger.warning("No predefined patterns matched. Trying simple extraction.")
-            lines = content.split("\n")
-            
-            for line in lines:
-                line = line.strip()
-                if line and ":" in line:  # Basic check for a message-like line
-                    parts = extract_message_parts(line)
-                    
-                    if parts["author"]:  # Only include if we could extract an author
-                        message = {
-                            "raw": line,
-                            "author": parts["author"],
-                            "message": parts["content"],
-                            "timestamp": parts["timestamp"]
-                        }
-                        messages.append(message)
-        
+
+        messages: List[Dict[str, Any]] = []
+
+        lines = content.split("\n")
+        for line in lines:
+            line = line.strip()
+            if not line or ":" not in line:
+                continue
+            parts = extract_message_parts(line)
+            if parts["author"]:
+                messages.append({
+                    "raw": line,
+                    "author": parts["author"],
+                    "message": parts["content"],
+                    "timestamp": parts["timestamp"]
+                })
+
+        # If we got a reasonable number, accept and skip heavy regex
+        if len(messages) >= 50:
+            logger.info(f"Fast line parser captured {len(messages)} msgs – skipping heavy regex stage")
+        else:
+            # Fallback to regex patterns for more precise capture (may be slower)
+            logger.info("Fast line parser insufficient; falling back to regex patterns")
+
+            # Common patterns for chat exports (can be extended)
+            patterns = [
+                # WhatsApp pattern: "[DATE, TIME] AUTHOR: MESSAGE"
+                r'\[(?P<date>[^\]]+), (?P<time>[^\]]+)\] (?P<author>[^:]+?): (?P<message>.*?)\n',
+                # WhatsApp pattern: "DATE, TIME - AUTHOR: MESSAGE"
+                r'(?P<date>\d{2}[./]\d{2}[./]\d{4}), (?P<time>\d{2}:\d{2}) - (?P<author>[^:]+?): (?P<message>.*?)(?=\n\d{2}[./]\d{2}|$)',
+                # Discord pattern: "AUTHOR [DATE TIME] MESSAGE"
+                r'(?P<author>[^\[]+?) \[(?P<date>[^\]]+?) (?P<time>[^\]]+?)\] (?P<message>.*?)(?=\n[^\[]|$)',
+            ]
+
+            messages = []  # reset
+            for pattern in patterns:
+                try:
+                    matches = re.finditer(pattern, content, re.MULTILINE)
+                except re.error as re_err:
+                    logger.warning(f"Regex compile error: {re_err} – skipping pattern")
+                    continue
+
+                for match in matches:
+                    groups = match.groupdict()
+                    raw_msg = match.group(0).strip()
+                    messages.append({
+                        "raw": raw_msg,
+                        "author": groups.get("author", "Unknown"),
+                        "message": groups.get("message", ""),
+                        "timestamp": f"{groups.get('date', '')} {groups.get('time', '')}".strip(),
+                    })
+
+                if messages:
+                    break  # Found using current pattern
+
+            if not messages:
+                logger.error("Failed to extract any messages even after regex stage.")
+                raise ValueError("Could not parse chat format")
+
+        # ensure we have messages (line parser might still be empty for rare formats)
         if not messages:
             logger.error("Failed to extract any messages from the chat file.")
             raise ValueError("Could not parse chat format")
-            
+
         logger.info(
             f"← END extract_messages_from_text — {len(messages)} msgs, elapsed {time.time() - _ts_start:.1f}s"
         )
