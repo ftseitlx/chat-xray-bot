@@ -73,6 +73,17 @@ async def safe_send_message(message: Message, text: str, **kwargs):
             return None
 
 
+# Helper function to safely delete a message
+async def safe_delete_message(message: Message):
+    """Delete a Telegram message with basic error handling."""
+    if message is None:
+        return
+    try:
+        await message.delete()
+    except Exception as e:
+        logger.warning(f"safe_delete_message error: {e}")
+
+
 @main_router.message(CommandStart())
 async def command_start(message: Message):
     await safe_send_message(
@@ -293,7 +304,6 @@ async def handle_document(message: Message):
         from app.services.render import render_to_pdf
         from app.utils.logging_utils import log_cost
         import uuid
-        from pathlib import Path
         import openai
         
         # Generate unique IDs for the files
@@ -401,7 +411,7 @@ async def handle_document(message: Message):
                 # If we're in local mode without a webhook, just send the file directly
                 if not settings.WEBHOOK_HOST:
                     logger.info("Running in local mode, sending file directly")
-                    await asyncio.create_task(status_message.delete())
+                    await safe_delete_message(status_message)
                     
                     # First send insights as HTML message
                     logger.info("Sending insights message")
@@ -438,7 +448,7 @@ async def handle_document(message: Message):
                 else:
                     # In production with webhook, send insights and a link
                     logger.info("Running in webhook mode, sending link to report")
-                    await asyncio.create_task(status_message.delete())
+                    await safe_delete_message(status_message)
                     
                     # First send insights as HTML message
                     logger.info("Sending insights message")
