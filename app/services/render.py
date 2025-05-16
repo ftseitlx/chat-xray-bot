@@ -28,8 +28,16 @@ async def render_to_pdf(html_path: Path, pdf_path: Path) -> str:
             with open(html_path, "r", encoding="utf-8") as f:
                 html_content = f.read()
             
-            # Render to PDF
-            weasyprint.HTML(string=html_content).write_pdf(pdf_path)
+            # Render to PDF - fix instantiation to work with newer WeasyPrint
+            try:
+                # Try the older API first (for backwards compatibility)
+                weasyprint.HTML(string=html_content).write_pdf(pdf_path)
+            except TypeError:
+                # If that fails, try the newer API
+                html = weasyprint.HTML(string=html_content)
+                pdf = html.render()
+                pdf.write_pdf(target=pdf_path)
+                
             logger.info(f"PDF generated successfully with WeasyPrint: {pdf_path}")
             
         except (ImportError, Exception) as e:
@@ -69,4 +77,19 @@ async def render_to_pdf(html_path: Path, pdf_path: Path) -> str:
         if settings.WEBHOOK_HOST:
             return f"{settings.WEBHOOK_HOST}/reports/{file_name}"
         else:
-            return f"file://{html_path}" 
+            return f"file://{html_path}"
+
+# Helper function used by tests
+def render_pdf(html_content: str, pdf_path: str) -> None:
+    """
+    Render HTML content to PDF using WeasyPrint (for testing)
+    """
+    import weasyprint
+    try:
+        # Try the older API first
+        weasyprint.HTML(string=html_content).write_pdf(pdf_path)
+    except TypeError:
+        # If that fails, try the newer API
+        html = weasyprint.HTML(string=html_content)
+        pdf = html.render()
+        pdf.write_pdf(target=pdf_path) 

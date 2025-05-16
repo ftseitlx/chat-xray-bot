@@ -33,7 +33,10 @@ COPY pyproject.toml poetry.lock* ./
 # Configure poetry to not use a virtual environment
 RUN poetry config virtualenvs.create false
 
-# Install dependencies with better error handling
+# First install WeasyPrint at a specific version
+RUN pip install --no-cache-dir WeasyPrint==60.1
+
+# Then install other dependencies
 RUN poetry install --no-interaction --no-ansi --no-dev || \
     (echo "Poetry install failed, falling back to pip..." && \
     pip install --no-cache-dir -r requirements.txt)
@@ -50,41 +53,13 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV OLLAMA_HOST=llama2-ollama.onrender.com
 ENV OLLAMA_PORT=443
 ENV OLLAMA_URL=https://llama2-ollama.onrender.com
-ENV WEASYPRINT_VERSION=60.1
 
 # Create a startup script with better error handling
 RUN echo '#!/bin/bash\n\
 set -e\n\
 echo "Starting Chat X-Ray Bot..."\n\
 echo "Python version: $(python --version)"\n\
-\n\
-# Function to check if a service is ready\n\
-wait_for_service() {\n\
-    local host=$1\n\
-    local port=$2\n\
-    local service=$3\n\
-    local url=$4\n\
-    local max_attempts=60\n\
-    local attempt=1\n\
-    \n\
-    echo "Waiting for $service to be ready at $url..."\n\
-    while ! curl -sf $url/api/version > /dev/null; do\n\
-        if [ $attempt -eq $max_attempts ]; then\n\
-            echo "$service is not available after $max_attempts attempts"\n\
-            echo "Will continue without $service and use OpenAI fallback if configured"\n\
-            return 1\n\
-        fi\n\
-        echo "Waiting for $service... attempt $attempt/$max_attempts"\n\
-        sleep 5\n\
-        attempt=$((attempt + 1))\n\
-    done\n\
-    echo "$service is ready!"\n\
-}\n\
-\n\
-# Check if Ollama is available\n\
-if [ -n "$OLLAMA_URL" ]; then\n\
-    wait_for_service "$OLLAMA_HOST" "$OLLAMA_PORT" "Ollama" "$OLLAMA_URL" || true\n\
-fi\n\
+echo "WeasyPrint version: $(pip show WeasyPrint | grep Version)"\n\
 \n\
 echo "Checking directories:"\n\
 ls -la /app\n\
@@ -102,12 +77,6 @@ echo "OLLAMA_URL set: $(if [ -n "$OLLAMA_URL" ]; then echo YES - $OLLAMA_URL; el
 \n\
 echo "Starting bot in webhook mode, binding to port ${PORT:-8000}..."\n\
 export PORT=${PORT:-8000}\n\
-\n\
-# Run tests before starting the application\n\
-echo "Running tests..."\n\
-python -m pytest tests/ -v || {\n\
-    echo "Tests failed with code $? - continuing anyway"\n\
-}\n\
 \n\
 # Starting the application\n\
 exec python -m app.bot\n' > /app/start.sh && chmod +x /app/start.sh

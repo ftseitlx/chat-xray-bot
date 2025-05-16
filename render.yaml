@@ -1,4 +1,5 @@
 services:
+  # Main application
   - type: web
     name: chat-xray-bot
     env: docker
@@ -12,6 +13,10 @@ services:
         value: llama2-ollama.onrender.com
       - key: OLLAMA_PORT
         value: 443
+      - key: OLLAMA_URL
+        value: https://llama2-ollama.onrender.com
+      - key: OLLAMA_MODEL
+        value: llama2:7b-chat
       - key: BOT_TOKEN
         sync: false
       - key: OPENAI_API_KEY
@@ -28,27 +33,17 @@ services:
         value: true
       - key: USE_LOCAL_LLM
         value: "true"
-      - key: OLLAMA_URL
-        value: https://llama2-ollama.onrender.com
-      - key: OLLAMA_MODEL
-        value: llama2:7b-chat
     healthCheckPath: /health
 
+  # Ollama service with pre-built model
   - type: web
     name: llama2-ollama
     env: docker
-    plan: standard  # 4 GB RAM for llama2:7b-chat
-    dockerfilePath: Dockerfile.ollama
-    port: 11434
-    autoDeploy: true
-    healthCheckPath: /api/version
-    healthCheckTimeout: 600
-    disk:
-      name: ollama-cache
-      mountPath: /root/.ollama
-      sizeGB: 20
+    plan: standard
+    dockerfilePath: ./Dockerfile.ollama
     envVars:
       - key: OLLAMA_HOST
         value: 0.0.0.0
       - key: OLLAMA_ORIGINS
-        value: "*" 
+        value: "*"
+    healthCheckPath: /api/version 

@@ -1,35 +1,16 @@
-# Dockerfile.ollama – image for public Ollama service on Render
+# Simple Ollama image with pre-installed llama2 model
 FROM ollama/ollama:latest
 
-# Set environment variables for the final running server
+# Set environment variables for serving
 ENV OLLAMA_HOST=0.0.0.0
 ENV OLLAMA_ORIGINS=*
-ENV OLLAMA_DEBUG=1
 
-# Install additional tools for debugging and maintenance
-RUN apt-get update && apt-get install -y \
-    curl \
-    wget \
-    procps \
-    net-tools \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+# Install model during build
+COPY --chmod=755 ./install-model.sh /install-model.sh
+RUN /install-model.sh
 
-# Copy and set up the entrypoint script
-COPY entrypoint-ollama.sh /entrypoint-ollama.sh
-RUN chmod +x /entrypoint-ollama.sh
-
-# Create health check script
-RUN echo '#!/bin/bash\n\
-curl -sf http://localhost:11434/api/version > /dev/null || exit 1\n' > /healthcheck.sh && chmod +x /healthcheck.sh
-
-# Expose the port that the application uses
+# Expose port
 EXPOSE 11434
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
-    CMD ["/healthcheck.sh"]
-
-ENTRYPOINT ["/entrypoint-ollama.sh"]
-# The CMD that the entrypoint will execute after setup
+# Simple startup - just run the server
 CMD ["ollama", "serve"] 
