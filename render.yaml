@@ -6,7 +6,7 @@ services:
     startCommand: docker run -p $PORT:8000 chat-xray-bot
     envVars:
       - key: PYTHON_VERSION
-        value: 3.12.0
+        value: 3.12.10
       - key: PORT
         value: 8000
       - key: OLLAMA_HOST
@@ -37,11 +37,11 @@ services:
   - type: private_service
     name: llama2-ollama
     env: docker
-    plan: starter  # 2 GB RAM, достаточно для llama2:7b-chat Q4
+    plan: standard  # 4 GB RAM for llama2:7b-chat
     dockerfilePath: Dockerfile.ollama
     port: 11434
-    autoDeploy: false
+    autoDeploy: true
     disk:
       name: ollama-cache
       mountPath: /root/.ollama
-      sizeGB: 10 
+      sizeGB: 20 

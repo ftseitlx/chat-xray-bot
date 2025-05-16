@@ -5,11 +5,16 @@ FROM ollama/ollama:latest
 ENV OLLAMA_HOST=0.0.0.0
 ENV OLLAMA_ORIGINS=*
 
-# Pre-pull the smallest viable chat model (fits 2-4 GB RAM plans)
-RUN ollama pull llama2:7b-chat
+# Create startup script
+RUN echo '#!/bin/bash\n\
+echo "Starting Ollama service..."\n\
+echo "Pulling llama2:7b-chat model..."\n\
+ollama pull llama2:7b-chat\n\
+echo "Starting Ollama server..."\n\
+exec ollama serve\n' > /start.sh && chmod +x /start.sh
 
 # Expose the Ollama API port
 EXPOSE 11434
 
-# Start Ollama
-CMD ["serve"] 
+# Start Ollama with the startup script
+CMD ["/start.sh"] 

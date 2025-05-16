@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12.10-slim
 
 WORKDIR /app
 
@@ -46,8 +46,8 @@ RUN mkdir -p uploads reports && chmod 777 uploads reports
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
-ENV OLLAMA_HOST=${OLLAMA_HOST:-localhost}
-ENV OLLAMA_PORT=${OLLAMA_PORT:-11434}
+ENV OLLAMA_HOST=llama2-ollama
+ENV OLLAMA_PORT=11434
 ENV WEASYPRINT_VERSION=60.1
 
 # Create a startup script with better error handling
@@ -61,17 +61,17 @@ wait_for_service() {\n\
     local host=$1\n\
     local port=$2\n\
     local service=$3\n\
-    local max_attempts=30\n\
+    local max_attempts=60\n\
     local attempt=1\n\
     \n\
     echo "Waiting for $service to be ready..."\n\
-    while ! curl -s http://$host:$port > /dev/null; do\n\
+    while ! curl -s http://$host:$port/api/version > /dev/null; do\n\
         if [ $attempt -eq $max_attempts ]; then\n\
             echo "$service is not available after $max_attempts attempts"\n\
             return 1\n\
         fi\n\
         echo "Waiting for $service... attempt $attempt/$max_attempts"\n\
-        sleep 2\n\
+        sleep 5\n\
         attempt=$((attempt + 1))\n\
     done\n\
     echo "$service is ready!"\n\
