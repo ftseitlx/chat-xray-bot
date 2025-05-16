@@ -1,43 +1,16 @@
 # Dockerfile.ollama – image for private Ollama Llama service on Render
 FROM ollama/ollama:latest
 
-# Set environment variables
+# Set environment variables for the final running server
 ENV OLLAMA_HOST=0.0.0.0
 ENV OLLAMA_ORIGINS=*
 
-# Create startup script
-RUN echo '#!/bin/bash\n\
-set -e\n\
-echo "Starting Ollama service..."\n\
-\n\
-echo "Starting Ollama server in background..."\n\
-ollama serve &\n\
-SERVER_PID=$!\n\
-\n\
-echo "Waiting for Ollama server to be ready..."\n\
-MAX_WAIT=30 # Wait for 30 * 2 = 60 seconds max for server to start\n\
-COUNT=0\n\
-while ! curl -s http://localhost:11434/api/version > /dev/null; do\n\
-    if [ $COUNT -ge $MAX_WAIT ]; then\n\
-        echo "Ollama server failed to start after $MAX_WAIT attempts."\n\
-        kill $SERVER_PID # Kill the server if it failed to start properly\n\
-        exit 1\n\
-    fi\n\
-    echo "Server not ready, waiting... (attempt $((COUNT+1))/$MAX_WAIT)"\n\
-    sleep 2\n\
-    COUNT=$((COUNT+1))\n\
-done\n\
-echo "Ollama server is ready."\n\
-\n\
-echo "Pulling llama2:7b-chat model..."\n\
-ollama pull llama2:7b-chat\n\
-\n\
-echo "Ollama service setup complete. Server running with PID $SERVER_PID."\n\
-# Keep container running by waiting for the server process\n\
-wait $SERVER_PID\n' > /start.sh && chmod +x /start.sh
+# Copy and set up the entrypoint script
+COPY entrypoint-ollama.sh /entrypoint-ollama.sh
+RUN chmod +x /entrypoint-ollama.sh
 
-# Expose the Ollama API port
 EXPOSE 11434
 
-# Start Ollama with the startup script
-CMD ["/start.sh"] 
+ENTRYPOINT ["/entrypoint-ollama.sh"]
+# The CMD that the entrypoint will execute after setup
+CMD ["ollama", "serve"] 
