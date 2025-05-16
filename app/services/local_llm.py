@@ -29,7 +29,7 @@ async def analyse_chunk_with_llama(text: str, timeout: int = 60) -> Dict[str, An
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             logger.info(f"Sending request to Ollama at {settings.OLLAMA_URL}")
-            r = await client.post(f"{settings.OLLAMA_URL}/v1/chat", json=payload)
+            r = await client.post(f"{settings.OLLAMA_URL}/api/chat", json=payload)
             r.raise_for_status()
             raw_resp = r.json().get("message", {}).get("content", "")
             logger.debug(f"Received response from Ollama: {raw_resp[:200]}...")
@@ -64,4 +64,49 @@ async def analyse_chunk_with_llama(text: str, timeout: int = 60) -> Dict[str, An
                 logger.error(f"Failed to parse extracted JSON: {e}")
         
         logger.warning("Failed to parse JSON from Llama response: %s", raw_resp[:200])
-        return {"error": "invalid_json", "raw": raw_resp[:500]} 
+        return {"error": "invalid_json", "raw": raw_resp[:500]}
+
+# Add LocalLLM class for tests
+class LocalLLM:
+    """A simple class-based client for Ollama used in tests"""
+    
+    def __init__(self):
+        self.url = settings.OLLAMA_URL
+        self.model = settings.OLLAMA_MODEL
+    
+    def is_available(self) -> bool:
+        """Check if Ollama is available by querying its API version endpoint"""
+        try:
+            response = httpx.get(f"{self.url}/api/version", timeout=5)
+            return response.status_code == 200
+        except Exception as e:
+            logger.error(f"Ollama service check failed: {e}")
+            return False
+    
+    def generate(self, prompt: str) -> str:
+        """Send a completion request to Ollama"""
+        try:
+            response = httpx.post(
+                f"{self.url}/api/generate",
+                json={"model": self.model, "prompt": prompt},
+                timeout=30
+            )
+            response.raise_for_status()
+            return response.json().get("response", "")
+        except Exception as e:
+            logger.error(f"Ollama generation failed: {e}")
+            return f"Error: {str(e)}"
+    
+    async def generate_async(self, prompt: str) -> str:
+        """Send an async completion request to Ollama"""
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    f"{self.url}/api/generate",
+                    json={"model": self.model, "prompt": prompt}
+                )
+                response.raise_for_status()
+                return response.json().get("response", "")
+        except Exception as e:
+            logger.error(f"Async Ollama generation failed: {e}")
+            return f"Error: {str(e)}" 
