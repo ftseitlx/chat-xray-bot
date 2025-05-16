@@ -45,8 +45,13 @@ services:
     port: 11434
     autoDeploy: true
     healthCheckPath: /api/version
-    healthCheckTimeout: 300
+    healthCheckTimeout: 600
     disk:
       name: ollama-cache
       mountPath: /root/.ollama
-      sizeGB: 20 
+      sizeGB: 20
+    envVars:
+      - key: OLLAMA_HOST
+        value: 0.0.0.0
+      - key: OLLAMA_ORIGINS
+        value: "*" 

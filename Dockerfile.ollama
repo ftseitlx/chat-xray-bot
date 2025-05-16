@@ -9,37 +9,17 @@ ENV OLLAMA_ORIGINS=*
 RUN echo '#!/bin/bash\n\
 echo "Starting Ollama service..."\n\
 \n\
-# Function to check if model is ready\n\
-check_model() {\n\
-    local model=$1\n\
-    local max_attempts=30\n\
-    local attempt=1\n\
-    \n\
-    echo "Checking if model $model is ready..."\n\
-    while ! ollama list | grep -q "$model"; do\n\
-        if [ $attempt -eq $max_attempts ]; then\n\
-            echo "Model $model is not ready after $max_attempts attempts"\n\
-            return 1\n\
-        fi\n\
-        echo "Waiting for model $model... attempt $attempt/$max_attempts"\n\
-        sleep 10\n\
-        attempt=$((attempt + 1))\n\
-    done\n\
-    echo "Model $model is ready!"\n\
-}\n\
-\n\
-# Start Ollama server in background\n\
+# Start Ollama server\n\
 echo "Starting Ollama server..."\n\
 ollama serve &\n\
 \n\
 # Wait for server to be ready\n\
 echo "Waiting for Ollama server to be ready..."\n\
-sleep 5\n\
+sleep 10\n\
 \n\
-# Pull and check model\n\
+# Pull model\n\
 echo "Pulling llama2:7b-chat model..."\n\
 ollama pull llama2:7b-chat\n\
-check_model "llama2:7b-chat"\n\
 \n\
 # Keep container running\n\
 wait\n' > /start.sh && chmod +x /start.sh
