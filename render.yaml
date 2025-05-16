@@ -5,6 +5,7 @@ services:
     plan: free
     healthCheckPath: /health
     port: 8080
+    dockerfilePath: Dockerfile
     envVars:
       - key: BOT_TOKEN
         sync: false
@@ -26,4 +27,22 @@ services:
       - key: REPORT_RETENTION_HOURS
         value: 72
       - key: ENABLE_COST_TRACKING
-        value: true 
+        value: true
+      - key: USE_LOCAL_LLM
+        value: "true"
+      - key: OLLAMA_URL
+        value: http://llama2-ollama:11434
+      - key: OLLAMA_MODEL
+        value: llama2:7b-chat
+
+  - type: private_service
+    name: llama2-ollama
+    env: docker
+    plan: starter  # 2 GB RAM, достаточно для llama2:7b-chat Q4
+    dockerfilePath: Dockerfile.ollama
+    port: 11434
+    autoDeploy: false
+    disk:
+      name: ollama-cache
+      mountPath: /root/.ollama
+      sizeGB: 10 
