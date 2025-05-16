@@ -78,7 +78,7 @@ PRIMARY_PROMPT = """
 
 async def process_chunk(chunk: List[Dict[str, Any]], max_retries: int = 3) -> Tuple[List[Dict[str, Any]], int]:
     """
-    Process a single chunk of messages using either local Llama or GPT-3.5-turbo.
+    Process a single chunk of messages using local Llama for analysis.
     
     Args:
         chunk: List of message dictionaries
@@ -87,99 +87,27 @@ async def process_chunk(chunk: List[Dict[str, Any]], max_retries: int = 3) -> Tu
     Returns:
         Tuple containing the list of processed message dictionaries with analysis and the number of tokens used
     """
-    # If local Llama mode enabled, route chunk to Ollama
-    if settings.USE_LOCAL_LLM:
-        try:
-            chunk_text = "\n\n".join(m["raw"] for m in chunk)
-            logger.info(f"Processing chunk with local Llama model: {settings.OLLAMA_MODEL}")
-            llama_result = await analyse_chunk_with_llama(chunk_text)
-            
-            if "error" in llama_result:
-                logger.error(f"Local Llama analysis failed: {llama_result['error']}")
-                if "details" in llama_result:
-                    logger.error(f"Error details: {llama_result['details']}")
-                # Fall through to OpenAI as safety net
-            else:
-                # Normalize to list-of-dicts shape expected downstream
-                if isinstance(llama_result, list):
-                    return llama_result, 0
-                else:
-                    return [llama_result], 0
-                    
-        except Exception as le:
-            logger.error(f"Local Llama analysis failed with exception: {le}")
-            # Fall through to OpenAI as safety net
-
-    # Format the chat log for the OpenAI model
-    chat_log = "\n\n".join([f"{msg['raw']}" for msg in chunk])
-    
-    retry_count = 0
-    backoff_time = 1  # Start with 1 second backoff
-    
-    while retry_count <= max_retries:
-        try:
-            # Call the OpenAI API
-            response = await client.chat.completions.create(
-                model=settings.PRIMARY_MODEL,
-                messages=[
-                    {"role": "system", "content": PRIMARY_PROMPT},
-                    {"role": "user", "content": f"Проанализируйте этот сегмент чата на русском языке:\n\n{chat_log}"}
-                ],
-                temperature=0.5,
-                max_tokens=4000,
-                n=1,
-                response_format={"type": "json_object"}
-            )
-            
-            # Extract the response content
-            result_text = response.choices[0].message.content
-            tokens_used = response.usage.total_tokens if hasattr(response, "usage") and response.usage else 0
-            
-            # Parse the JSON response
-            try:
-                result_json = json.loads(result_text)
-                
-                # Check if we got a list as expected
-                if "messages" in result_json:
-                    return result_json["messages"], tokens_used
-                elif isinstance(result_json, list):
-                    return result_json, tokens_used
-                else:
-                    # Try to adapt the format if it's not as expected
-                    return [result_json], tokens_used
-                    
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse JSON from GPT-3.5 response: {e}")
-                logger.debug(f"Raw response: {result_text}")
-                
-                # Try a more forgiving approach - use regex to extract JSON objects
-                import re
-                json_objects = re.findall(r'\{[^{}]*\}', result_text)
-                if json_objects:
-                    try:
-                        return [json.loads(obj) for obj in json_objects], tokens_used
-                    except:
-                        pass
-                
-                # Return a basic structure if JSON parsing fails
-                return [{"error": "Failed to parse model output", "raw_input": msg["raw"]} for msg in chunk], tokens_used
+    # Route chunk to Ollama for analysis
+    try:
+        chunk_text = "\n\n".join(m["raw"] for m in chunk)
+        logger.info(f"Processing chunk with local Llama model: {settings.OLLAMA_MODEL}")
+        llama_result = await analyse_chunk_with_llama(chunk_text)
         
-        except openai.RateLimitError as e:
-            retry_count += 1
-            logger.warning(f"Rate limit exceeded (attempt {retry_count}/{max_retries}): {e}")
+        if "error" in llama_result:
+            logger.error(f"Local Llama analysis failed: {llama_result['error']}")
+            if "details" in llama_result:
+                logger.error(f"Error details: {llama_result['details']}")
+            return [{"error": llama_result["error"], "raw_input": msg["raw"]} for msg in chunk], 0
             
-            if retry_count <= max_retries:
-                logger.info(f"Retrying in {backoff_time} seconds...")
-                time.sleep(backoff_time)
-                backoff_time *= 2  # Exponential backoff
-            else:
-                logger.error("Max retries reached. Returning error structure.")
-                return [{"error": str(e), "raw_input": msg["raw"]} for msg in chunk], 0
+        # Normalize to list-of-dicts shape expected downstream
+        if isinstance(llama_result, list):
+            return llama_result, 0
+        else:
+            return [llama_result], 0
                 
-        except openai.OpenAIError as e:
-            logger.error(f"OpenAI API error: {e}")
-            # Return an error object
-            return [{"error": str(e), "raw_input": msg["raw"]} for msg in chunk], 0
+    except Exception as le:
+        logger.error(f"Local Llama analysis failed with exception: {le}")
+        return [{"error": str(le), "raw_input": msg["raw"]} for msg in chunk], 0
 
 
 async def process_chunks(
