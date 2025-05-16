@@ -1,7 +1,8 @@
 import json
 import httpx
 import logging
-from typing import Dict, Any
+import asyncio
+from typing import Dict, Any, Optional, List
 
 from app.config import settings
 
@@ -16,8 +17,9 @@ SYSTEM_PROMPT = (
 )
 
 async def analyse_chunk_with_llama(text: str, timeout: int = 60) -> Dict[str, Any]:
-    """Send the chunk to a local Ollama Llama2 chat model and parse JSON reply."""
-    payload = {
+    """Send the chunk to a local Ollama Llama2 chat model and parse JSON reply.
+    Will attempt different API endpoints and fall back to OpenAI if needed."""
+    payload_chat = {
         "model": settings.OLLAMA_MODEL,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -25,46 +27,108 @@ async def analyse_chunk_with_llama(text: str, timeout: int = 60) -> Dict[str, An
         ],
         "temperature": 0.3,
     }
-
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            logger.info(f"Sending request to Ollama at {settings.OLLAMA_URL}")
-            r = await client.post(f"{settings.OLLAMA_URL}/api/chat", json=payload)
-            r.raise_for_status()
-            raw_resp = r.json().get("message", {}).get("content", "")
-            logger.debug(f"Received response from Ollama: {raw_resp[:200]}...")
-    except httpx.ConnectError as e:
-        logger.error(f"Failed to connect to Ollama at {settings.OLLAMA_URL}: {e}")
-        return {"error": "connection_failed", "details": str(e)}
-    except httpx.TimeoutException as e:
-        logger.error(f"Request to Ollama timed out after {timeout}s: {e}")
-        return {"error": "timeout", "details": str(e)}
-    except httpx.HTTPError as e:
-        logger.error(f"HTTP error from Ollama: {e}")
-        return {"error": "http_error", "details": str(e)}
-    except Exception as e:
-        logger.error(f"Unexpected error during Ollama request: {e}")
-        return {"error": "unexpected_error", "details": str(e)}
-
-    # Attempt to parse JSON strictly
-    try:
-        result = json.loads(raw_resp)
-        logger.info("Successfully parsed JSON response from Ollama")
-        return result
-    except json.JSONDecodeError:
-        # Fallback: try to extract first JSON object
-        import re
-        m = re.search(r"\{.*\}", raw_resp, re.S)
-        if m:
+    
+    payload_generate = {
+        "model": settings.OLLAMA_MODEL,
+        "prompt": f"{SYSTEM_PROMPT}\n\nВходящий текст: {text[:4096]}",
+        "temperature": 0.3,
+    }
+    
+    # Try different endpoints in sequence
+    endpoints = [
+        ("/api/chat", payload_chat, lambda r: r.json().get("message", {}).get("content", "")),
+        ("/v1/chat/completions", payload_chat, lambda r: r.json().get("choices", [{}])[0].get("message", {}).get("content", "")),
+        ("/api/generate", payload_generate, lambda r: r.json().get("response", "")),
+        ("/v1/completions", payload_generate, lambda r: r.json().get("choices", [{}])[0].get("text", ""))
+    ]
+    
+    errors = []
+    
+    for endpoint, payload, response_extractor in endpoints:
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                url = f"{settings.OLLAMA_URL}{endpoint}"
+                logger.info(f"Trying Ollama endpoint {url}")
+                r = await client.post(url, json=payload)
+                r.raise_for_status()
+                raw_resp = response_extractor(r)
+                if raw_resp:
+                    logger.debug(f"Received response from Ollama: {raw_resp[:200]}...")
+                    
+                    # Try to parse JSON
+                    try:
+                        result = json.loads(raw_resp)
+                        logger.info(f"Successfully parsed JSON response from Ollama via {endpoint}")
+                        return result
+                    except json.JSONDecodeError:
+                        # Fallback: try to extract first JSON object
+                        import re
+                        m = re.search(r"\{.*\}", raw_resp, re.S)
+                        if m:
+                            try:
+                                result = json.loads(m.group(0))
+                                logger.info(f"Successfully extracted and parsed JSON from response via {endpoint}")
+                                return result
+                            except Exception as e:
+                                logger.error(f"Failed to parse extracted JSON: {e}")
+                
+                logger.warning(f"Failed to get usable response from {endpoint}")
+                
+        except httpx.ConnectError as e:
+            logger.error(f"Failed to connect to Ollama at {settings.OLLAMA_URL}{endpoint}: {e}")
+            errors.append(f"Connection error ({endpoint}): {str(e)}")
+        except httpx.TimeoutException as e:
+            logger.error(f"Request to Ollama timed out after {timeout}s: {e}")
+            errors.append(f"Timeout error ({endpoint}): {str(e)}")
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error from Ollama ({endpoint}): {e}")
+            errors.append(f"HTTP error ({endpoint}): {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error during Ollama request ({endpoint}): {e}")
+            errors.append(f"Unexpected error ({endpoint}): {str(e)}")
+    
+    # All Ollama endpoints failed, fallback to OpenAI if available
+    if settings.OPENAI_API_KEY:
+        logger.warning("All Ollama endpoints failed. Falling back to OpenAI.")
+        try:
+            import openai
+            from openai import AsyncOpenAI
+            
+            client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+            
+            response = await client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": text[:4096]}
+                ],
+                temperature=0.3,
+            )
+            
+            raw_resp = response.choices[0].message.content
+            
             try:
-                result = json.loads(m.group(0))
-                logger.info("Successfully extracted and parsed JSON from response")
+                result = json.loads(raw_resp)
+                logger.info("Successfully parsed JSON response from OpenAI")
                 return result
-            except Exception as e:
-                logger.error(f"Failed to parse extracted JSON: {e}")
+            except json.JSONDecodeError:
+                # Fallback: try to extract first JSON object
+                import re
+                m = re.search(r"\{.*\}", raw_resp, re.S)
+                if m:
+                    try:
+                        result = json.loads(m.group(0))
+                        logger.info("Successfully extracted and parsed JSON from OpenAI response")
+                        return result
+                    except Exception as e:
+                        logger.error(f"Failed to parse extracted JSON from OpenAI: {e}")
+            
+        except Exception as e:
+            logger.error(f"OpenAI fallback failed: {e}")
+            errors.append(f"OpenAI fallback error: {str(e)}")
         
-        logger.warning("Failed to parse JSON from Llama response: %s", raw_resp[:200])
-        return {"error": "invalid_json", "raw": raw_resp[:500]}
+    logger.warning(f"All LLM attempts failed. Errors: {', '.join(errors)}")
+    return {"error": "all_endpoints_failed", "details": errors}
 
 # Add LocalLLM class for tests
 class LocalLLM:
@@ -77,36 +141,92 @@ class LocalLLM:
     def is_available(self) -> bool:
         """Check if Ollama is available by querying its API version endpoint"""
         try:
-            response = httpx.get(f"{self.url}/api/version", timeout=5)
-            return response.status_code == 200
+            # Try several endpoints to see if any respond
+            for endpoint in ['/api/version', '/v1/models', '/']:
+                try:
+                    response = httpx.get(f"{self.url}{endpoint}", timeout=5)
+                    if response.status_code == 200:
+                        logger.info(f"Ollama is available via {endpoint}")
+                        return True
+                except:
+                    continue
+            
+            logger.error("All Ollama API endpoints failed")
+            return False
         except Exception as e:
             logger.error(f"Ollama service check failed: {e}")
             return False
     
     def generate(self, prompt: str) -> str:
         """Send a completion request to Ollama"""
-        try:
-            response = httpx.post(
-                f"{self.url}/api/generate",
-                json={"model": self.model, "prompt": prompt},
-                timeout=30
-            )
-            response.raise_for_status()
-            return response.json().get("response", "")
-        except Exception as e:
-            logger.error(f"Ollama generation failed: {e}")
-            return f"Error: {str(e)}"
+        endpoints = [
+            ('/api/generate', lambda r: r.json().get("response", "")),
+            ('/v1/completions', lambda r: r.json().get("choices", [{}])[0].get("text", ""))
+        ]
+        
+        for endpoint, response_extractor in endpoints:
+            try:
+                response = httpx.post(
+                    f"{self.url}{endpoint}",
+                    json={"model": self.model, "prompt": prompt},
+                    timeout=30
+                )
+                response.raise_for_status()
+                result = response_extractor(response)
+                if result:
+                    return result
+            except:
+                continue
+                
+        # Fallback to OpenAI if available
+        if settings.OPENAI_API_KEY:
+            try:
+                import openai
+                client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+                response = client.completions.create(
+                    model="gpt-3.5-turbo-instruct",
+                    prompt=prompt,
+                    max_tokens=150
+                )
+                return response.choices[0].text
+            except Exception as e:
+                logger.error(f"OpenAI fallback failed: {e}")
+                
+        return "Error: All LLM endpoints failed"
     
     async def generate_async(self, prompt: str) -> str:
         """Send an async completion request to Ollama"""
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.post(
-                    f"{self.url}/api/generate",
-                    json={"model": self.model, "prompt": prompt}
+        endpoints = [
+            ('/api/generate', lambda r: r.json().get("response", "")),
+            ('/v1/completions', lambda r: r.json().get("choices", [{}])[0].get("text", ""))
+        ]
+        
+        for endpoint, response_extractor in endpoints:
+            try:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    response = await client.post(
+                        f"{self.url}{endpoint}",
+                        json={"model": self.model, "prompt": prompt}
+                    )
+                    response.raise_for_status()
+                    result = response_extractor(response)
+                    if result:
+                        return result
+            except:
+                continue
+                
+        # Fallback to OpenAI if available
+        if settings.OPENAI_API_KEY:
+            try:
+                from openai import AsyncOpenAI
+                client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+                response = await client.completions.create(
+                    model="gpt-3.5-turbo-instruct",
+                    prompt=prompt,
+                    max_tokens=150
                 )
-                response.raise_for_status()
-                return response.json().get("response", "")
-        except Exception as e:
-            logger.error(f"Async Ollama generation failed: {e}")
-            return f"Error: {str(e)}" 
+                return response.choices[0].text
+            except Exception as e:
+                logger.error(f"Async OpenAI fallback failed: {e}")
+                
+        return "Error: All async LLM endpoints failed" 
