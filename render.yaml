@@ -1,9 +1,8 @@
 services:
   - type: web
     name: chat-xray-bot
-    env: python
-    buildCommand: docker build -t chat-xray-bot .
-    startCommand: docker run -p $PORT:8000 chat-xray-bot
+    env: docker
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.10
@@ -36,6 +35,7 @@ services:
     dependsOn:
       - name: llama2-ollama
         type: private_service
+    healthCheckPath: /health
 
   - type: private_service
     name: llama2-ollama
