@@ -112,3 +112,62 @@ MIT License
 ## Credits
 
 Developed by Felix
+
+## Ollama Integration
+
+This bot can use Ollama to run language models locally instead of relying solely on OpenAI APIs. The integration supports multiple API endpoints and fallback mechanisms.
+
+### Local Development with Ollama
+
+To run the bot locally with Ollama:
+
+1. Make sure Docker and Docker Compose are installed
+2. Run the setup script:
+   ```
+   ./run-local.sh
+   ```
+3. This will start two containers:
+   - The main bot on http://localhost:8000
+   - Ollama service on http://localhost:11434
+
+### Deployment on Render
+
+The bot is configured to run on Render with two services:
+- `chat-xray-bot`: The main bot service
+- `llama2-ollama`: The Ollama service that provides LLM capabilities
+
+To deploy:
+1. Push changes to GitHub
+2. Use the deployment script:
+   ```
+   ./deploy-with-gh.sh
+   ```
+
+### Testing Ollama Connection
+
+You can test the Ollama connection with:
+```
+./check_ollama_connection.py
+```
+
+Or test the full API functionality:
+```
+./test_ollama_api.py
+```
+
+## Troubleshooting
+
+### WeasyPrint Issues
+
+If you encounter WeasyPrint errors related to PDF generation, the application includes compatibility code for multiple WeasyPrint API versions:
+- WeasyPrint < 52.0 (older API)
+- WeasyPrint 52.x - 59.x (middle API)
+- WeasyPrint 60+ (newest API)
+
+### Ollama Connection Issues
+
+If the Ollama service is not responding:
+1. Check if the service is running (`docker ps`)
+2. Run the connection test (`./check_ollama_connection.py`)
+3. Verify the endpoints in `app/services/local_llm.py`
+4. Ensure the Render service has properly initialized

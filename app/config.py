@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # Ollama settings
     USE_LOCAL_LLM: bool = os.getenv("USE_LOCAL_LLM", "true").lower() == "true"
     OLLAMA_URL: str = os.getenv("OLLAMA_URL", "http://llama2-ollama:11434")
-    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama2:7b-chat")
+    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.2")
     
     # Default model configurations
     PRIMARY_MODEL: str = "gpt-3.5-turbo"

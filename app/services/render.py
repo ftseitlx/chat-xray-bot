@@ -23,20 +23,34 @@ async def render_to_pdf(html_path: Path, pdf_path: Path) -> str:
         try:
             import weasyprint
             logger.info(f"Rendering PDF with WeasyPrint: {pdf_path}")
+            logger.info(f"WeasyPrint version: {weasyprint.__version__}")
             
             # Read HTML content
             with open(html_path, "r", encoding="utf-8") as f:
                 html_content = f.read()
             
-            # Render to PDF - fix instantiation to work with newer WeasyPrint
+            # Render to PDF - handle multiple WeasyPrint API versions
             try:
-                # Try the older API first (for backwards compatibility)
+                # First attempt - older API (WeasyPrint < 52.0)
                 weasyprint.HTML(string=html_content).write_pdf(pdf_path)
-            except TypeError:
-                # If that fails, try the newer API
-                html = weasyprint.HTML(string=html_content)
-                pdf = html.render()
-                pdf.write_pdf(target=pdf_path)
+                logger.info("Used WeasyPrint older API successfully")
+            except TypeError as e:
+                if "takes 1 positional argument but" in str(e):
+                    # Second attempt - middle API (WeasyPrint 52.x - 59.x)
+                    html = weasyprint.HTML(string=html_content)
+                    pdf = html.render()
+                    pdf.write_pdf(target=pdf_path)
+                    logger.info("Used WeasyPrint middle API successfully")
+                else:
+                    # Third attempt - newest API (WeasyPrint 60+)
+                    html = weasyprint.HTML(string=html_content)
+                    pdf = html.render()
+                    with open(pdf_path, 'wb') as f:
+                        pdf.write_pdf(f)
+                    logger.info("Used WeasyPrint newest API successfully")
+            except Exception as e:
+                logger.error(f"All WeasyPrint API attempts failed: {e}")
+                raise
                 
             logger.info(f"PDF generated successfully with WeasyPrint: {pdf_path}")
             
@@ -86,10 +100,17 @@ def render_pdf(html_content: str, pdf_path: str) -> None:
     """
     import weasyprint
     try:
-        # Try the older API first
+        # First attempt - older API (WeasyPrint < 52.0)
         weasyprint.HTML(string=html_content).write_pdf(pdf_path)
-    except TypeError:
-        # If that fails, try the newer API
-        html = weasyprint.HTML(string=html_content)
-        pdf = html.render()
-        pdf.write_pdf(target=pdf_path) 
+    except TypeError as e:
+        if "takes 1 positional argument but" in str(e):
+            # Second attempt - middle API (WeasyPrint 52.x - 59.x)
+            html = weasyprint.HTML(string=html_content)
+            pdf = html.render()
+            pdf.write_pdf(target=pdf_path)
+        else:
+            # Third attempt - newest API (WeasyPrint 60+)
+            html = weasyprint.HTML(string=html_content)
+            pdf = html.render()
+            with open(pdf_path, 'wb') as f:
+                pdf.write_pdf(f) 

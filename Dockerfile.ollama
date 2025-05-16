@@ -5,12 +5,11 @@ FROM ollama/ollama:latest
 ENV OLLAMA_HOST=0.0.0.0
 ENV OLLAMA_ORIGINS=*
 
-# Install model during build
-COPY --chmod=755 ./install-model.sh /install-model.sh
-RUN /install-model.sh
+# Copy and use our setup script instead
+COPY --chmod=755 ./setup-ollama-render.sh /setup-ollama-render.sh
 
 # Expose port
 EXPOSE 11434
 
-# Simple startup - just run the server
-CMD ["ollama", "serve"] 
+# Run our setup script which manages the complete lifecycle
+CMD ["/setup-ollama-render.sh"] 

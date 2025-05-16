@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_HOST=ollama
+      - OLLAMA_PORT=11434
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=llama3.2
+      - USE_LOCAL_LLM=true
+      - PORT=8000
+    depends_on:
+      - ollama
+    volumes:
+      - ./uploads:/app/uploads
+      - ./reports:/app/reports
+    networks:
+      - app-network
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    command: >
+      sh -c "ollama serve & sleep 5 && ollama pull llama3.2 && tail -f /dev/null"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - app-network
+
+volumes:
+  ollama_data:
+
+networks:
+  app-network:
+    driver: bridge 
