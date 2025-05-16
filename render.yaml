@@ -10,9 +10,9 @@ services:
       - key: PORT
         value: 8000
       - key: OLLAMA_HOST
-        value: ${OLLAMA_HOST}
+        value: llama2-ollama
       - key: OLLAMA_PORT
-        value: ${OLLAMA_PORT}
+        value: 11434
       - key: BOT_TOKEN
         sync: false
       - key: OPENAI_API_KEY

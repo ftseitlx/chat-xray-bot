@@ -1,10 +1,15 @@
 # Dockerfile.ollama – image for private Ollama Llama service on Render
 FROM ollama/ollama:latest
 
+# Set environment variables
+ENV OLLAMA_HOST=0.0.0.0
+ENV OLLAMA_ORIGINS=*
+
 # Pre-pull the smallest viable chat model (fits 2-4 GB RAM plans)
 RUN ollama pull llama2:7b-chat
 
+# Expose the Ollama API port
 EXPOSE 11434
 
-# Start Ollama on the default port explicitly
-CMD ["ollama", "serve", "-p", "11434"] 
+# Start Ollama
+CMD ["serve"] 
