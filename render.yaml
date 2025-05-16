@@ -9,9 +9,9 @@ services:
       - key: PORT
         value: 8000
       - key: OLLAMA_HOST
-        value: llama2-ollama
+        value: llama2-ollama.onrender.com
       - key: OLLAMA_PORT
-        value: 11434
+        value: 443
       - key: BOT_TOKEN
         sync: false
       - key: OPENAI_API_KEY
@@ -29,15 +29,12 @@ services:
       - key: USE_LOCAL_LLM
         value: "true"
       - key: OLLAMA_URL
-        value: http://llama2-ollama:11434
+        value: https://llama2-ollama.onrender.com
       - key: OLLAMA_MODEL
         value: llama2:7b-chat
-    dependsOn:
-      - name: llama2-ollama
-        type: private_service
     healthCheckPath: /health
 
-  - type: private_service
+  - type: web
     name: llama2-ollama
     env: docker
     plan: standard  # 4 GB RAM for llama2:7b-chat
