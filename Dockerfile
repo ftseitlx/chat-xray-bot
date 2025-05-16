@@ -65,18 +65,18 @@ echo "WEBHOOK_HOST set: $(if [ -n "$WEBHOOK_HOST" ]; then echo YES; else echo NO
 echo "PORT set: $(if [ -n "$PORT" ]; then echo YES - $PORT; else echo NO; fi)"\n\
 echo "OLLAMA_URL set: $(if [ -n "$OLLAMA_URL" ]; then echo YES - $OLLAMA_URL; else echo NO; fi)"\n\
 echo "OLLAMA_MODEL set: $(if [ -n "$OLLAMA_MODEL" ]; then echo YES - $OLLAMA_MODEL; else echo NO; fi)"\n\
-echo "Starting bot in webhook mode, binding to port ${PORT:-8080}..."\n\
+echo "Starting bot in webhook mode, binding to port ${PORT:-8000}..."\n\
 # Make sure we use the right port\n\
-export PORT=${PORT:-8080}\n\
+export PORT=${PORT:-8000}\n\
 # Starting the application\n\
 exec python -m app.bot\n' > /app/start.sh && chmod +x /app/start.sh
 
 # Expose the port that the application uses
-EXPOSE 8080
+EXPOSE 8000
 
 # Start the bot using the startup script
 CMD ["/app/start.sh"]
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1 
+    CMD curl -f http://localhost:8000/health || exit 1 
