@@ -3,6 +3,8 @@ import httpx
 import logging
 import asyncio
 from typing import Dict, Any, Optional, List
+import openai
+from openai import AsyncOpenAI
 
 from app.config import settings
 
@@ -17,247 +19,97 @@ SYSTEM_PROMPT = (
 )
 
 async def analyse_chunk_with_llama(text: str, timeout: int = 60) -> Dict[str, Any]:
-    """Send the chunk to a local Ollama Llama2 chat model and parse JSON reply.
-    Will attempt different API endpoints and fall back to OpenAI if needed."""
-    payload_chat = {
-        "model": settings.OLLAMA_MODEL,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": text[:4096]},  # truncate to keep response fast
-        ],
-        "temperature": 0.3,
-    }
+    """
+    Process text chunks using OpenAI GPT-3.5-turbo model.
+    This function no longer uses Ollama/Llama2 but uses OpenAI API directly.
+    """
+    # Initialize OpenAI client
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     
-    payload_generate = {
-        "model": settings.OLLAMA_MODEL,
-        "prompt": f"{SYSTEM_PROMPT}\n\nВходящий текст: {text[:4096]}",
-        "temperature": 0.3,
-    }
-    
-    # Try different potential base URLs
-    base_urls = [
-        settings.OLLAMA_URL,                                # Default from settings
-        settings.OLLAMA_URL.rstrip('/api'),                 # Remove /api if present
-        f"http://{settings.OLLAMA_HOST}:{settings.OLLAMA_PORT}",  # Construct from host/port
-        "http://llama2-ollama:11434",                      # Docker service name
-        "http://ollama:11434",                             # Docker compose service name
-        "https://llama2-ollama.onrender.com",              # Direct Render URL
-        "https://llama2-ollama.onrender.com/api"           # Render URL with /api
-    ]
-    
-    # Try different endpoints for each base URL
-    endpoints = [
-        ("/api/chat", payload_chat, lambda r: r.json().get("message", {}).get("content", "")),
-        ("/v1/chat/completions", payload_chat, lambda r: r.json().get("choices", [{}])[0].get("message", {}).get("content", "")),
-        ("/api/generate", payload_generate, lambda r: r.json().get("response", "")),
-        ("/v1/completions", payload_generate, lambda r: r.json().get("choices", [{}])[0].get("text", ""))
-    ]
-    
-    errors = []
-    
-    # Try all base URL + endpoint combinations
-    for base_url in base_urls:
-        base_url = base_url.rstrip('/')  # Normalize URL
-        logger.info(f"Trying base URL: {base_url}")
+    try:
+        logger.info(f"Processing chunk with GPT-3.5-turbo, text length: {len(text[:100])}...")
         
-        for endpoint, payload, response_extractor in endpoints:
-            try:
-                async with httpx.AsyncClient(timeout=timeout) as client:
-                    url = f"{base_url}{endpoint}"
-                    logger.info(f"Trying Ollama endpoint {url}")
-                    r = await client.post(url, json=payload)
-                    r.raise_for_status()
-                    raw_resp = response_extractor(r)
-                    
-                    if raw_resp:
-                        logger.debug(f"Received response from Ollama: {raw_resp[:200]}...")
-                        
-                        # Try to parse JSON
-                        try:
-                            result = json.loads(raw_resp)
-                            logger.info(f"Successfully parsed JSON response from Ollama via {url}")
-                            return result
-                        except json.JSONDecodeError:
-                            # Fallback: try to extract first JSON object
-                            import re
-                            m = re.search(r"\{.*\}", raw_resp, re.S)
-                            if m:
-                                try:
-                                    result = json.loads(m.group(0))
-                                    logger.info(f"Successfully extracted and parsed JSON from response via {url}")
-                                    return result
-                                except Exception as e:
-                                    logger.error(f"Failed to parse extracted JSON: {e}")
-                    
-                    logger.warning(f"Failed to get usable response from {url}")
-                    
-            except httpx.ConnectError as e:
-                logger.error(f"Failed to connect to Ollama at {url}: {e}")
-                errors.append(f"Connection error ({url}): {str(e)}")
-            except httpx.TimeoutException as e:
-                logger.error(f"Request to Ollama at {url} timed out after {timeout}s: {e}")
-                errors.append(f"Timeout error ({url}): {str(e)}")
-            except httpx.HTTPError as e:
-                logger.error(f"HTTP error from Ollama ({url}): {e}")
-                errors.append(f"HTTP error ({url}): {str(e)}")
-            except Exception as e:
-                logger.error(f"Unexpected error during Ollama request ({url}): {e}")
-                errors.append(f"Unexpected error ({url}): {str(e)}")
-    
-    # All Ollama endpoints failed, fallback to OpenAI if available
-    if settings.OPENAI_API_KEY:
-        logger.warning("All Ollama endpoints failed. Falling back to OpenAI.")
+        response = await client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": text[:4096]}
+            ],
+            temperature=0.3,
+        )
+        
+        raw_resp = response.choices[0].message.content
+        
         try:
-            import openai
-            from openai import AsyncOpenAI
+            result = json.loads(raw_resp)
+            logger.info("Successfully parsed JSON response from OpenAI")
+            return result
+        except json.JSONDecodeError:
+            # Fallback: try to extract first JSON object
+            import re
+            m = re.search(r"\{.*\}", raw_resp, re.S)
+            if m:
+                try:
+                    result = json.loads(m.group(0))
+                    logger.info("Successfully extracted and parsed JSON from OpenAI response")
+                    return result
+                except Exception as e:
+                    logger.error(f"Failed to parse extracted JSON from OpenAI: {e}")
             
-            client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+            logger.error("Failed to parse JSON response")
+            return {"error": "json_parse_error", "raw_response": raw_resp[:200]}
             
-            response = await client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": text[:4096]}
-                ],
-                temperature=0.3,
-            )
-            
-            raw_resp = response.choices[0].message.content
-            
-            try:
-                result = json.loads(raw_resp)
-                logger.info("Successfully parsed JSON response from OpenAI")
-                return result
-            except json.JSONDecodeError:
-                # Fallback: try to extract first JSON object
-                import re
-                m = re.search(r"\{.*\}", raw_resp, re.S)
-                if m:
-                    try:
-                        result = json.loads(m.group(0))
-                        logger.info("Successfully extracted and parsed JSON from OpenAI response")
-                        return result
-                    except Exception as e:
-                        logger.error(f"Failed to parse extracted JSON from OpenAI: {e}")
-            
-        except Exception as e:
-            logger.error(f"OpenAI fallback failed: {e}")
-            errors.append(f"OpenAI fallback error: {str(e)}")
-        
-    logger.warning(f"All LLM attempts failed. Errors: {', '.join(errors)}")
-    return {"error": "all_endpoints_failed", "details": errors}
+    except Exception as e:
+        logger.error(f"OpenAI API error: {e}")
+        return {"error": "openai_api_error", "details": str(e)}
 
-# Add LocalLLM class for tests
+# Keep LocalLLM class for compatibility with existing code
 class LocalLLM:
-    """A simple class-based client for Ollama used in tests"""
+    """
+    Compatibility class that now uses OpenAI instead of Ollama/Llama
+    """
     
     def __init__(self):
-        self.base_urls = [
-            settings.OLLAMA_URL,                                # Default from settings
-            settings.OLLAMA_URL.rstrip('/api'),                 # Remove /api if present
-            f"http://{settings.OLLAMA_HOST}:{settings.OLLAMA_PORT}",  # Construct from host/port
-            "http://llama2-ollama:11434",                      # Docker service name
-            "http://ollama:11434",                             # Docker compose service name
-            "https://llama2-ollama.onrender.com",              # Direct Render URL
-            "https://llama2-ollama.onrender.com/api"           # Render URL with /api
-        ]
-        self.model = settings.OLLAMA_MODEL
+        self.model = "gpt-3.5-turbo"
     
     def is_available(self) -> bool:
-        """Check if Ollama is available by querying its API version endpoint"""
+        """Check if OpenAI API is accessible"""
         try:
-            # Try several endpoints to see if any respond
-            for base_url in self.base_urls:
-                base_url = base_url.rstrip('/')
-                for endpoint in ['/api/version', '/v1/models', '/']:
-                    try:
-                        response = httpx.get(f"{base_url}{endpoint}", timeout=5)
-                        if response.status_code == 200:
-                            logger.info(f"Ollama is available via {base_url}{endpoint}")
-                            return True
-                    except:
-                        continue
-            
-            logger.error("All Ollama API endpoints failed")
-            return False
+            # Just check if we have an API key
+            if not settings.OPENAI_API_KEY:
+                logger.error("OpenAI API key is not set")
+                return False
+                
+            logger.info("OpenAI integration is available")
+            return True
         except Exception as e:
-            logger.error(f"Ollama service check failed: {e}")
+            logger.error(f"OpenAI service check failed: {e}")
             return False
     
     def generate(self, prompt: str) -> str:
-        """Send a completion request to Ollama"""
-        for base_url in self.base_urls:
-            base_url = base_url.rstrip('/')
-            endpoints = [
-                ('/api/generate', lambda r: r.json().get("response", "")),
-                ('/v1/completions', lambda r: r.json().get("choices", [{}])[0].get("text", ""))
-            ]
-            
-            for endpoint, response_extractor in endpoints:
-                try:
-                    response = httpx.post(
-                        f"{base_url}{endpoint}",
-                        json={"model": self.model, "prompt": prompt},
-                        timeout=30
-                    )
-                    response.raise_for_status()
-                    result = response_extractor(response)
-                    if result:
-                        return result
-                except:
-                    continue
-                
-        # Fallback to OpenAI if available
-        if settings.OPENAI_API_KEY:
-            try:
-                import openai
-                client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
-                response = client.completions.create(
-                    model="gpt-3.5-turbo-instruct",
-                    prompt=prompt,
-                    max_tokens=150
-                )
-                return response.choices[0].text
-            except Exception as e:
-                logger.error(f"OpenAI fallback failed: {e}")
-                
-        return "Error: All LLM endpoints failed"
+        """Send a completion request to OpenAI"""
+        try:
+            client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+            response = client.completions.create(
+                model="gpt-3.5-turbo-instruct",
+                prompt=prompt,
+                max_tokens=150
+            )
+            return response.choices[0].text
+        except Exception as e:
+            logger.error(f"OpenAI generate error: {e}")
+            return f"Error: OpenAI API error - {str(e)}"
     
     async def generate_async(self, prompt: str) -> str:
-        """Send an async completion request to Ollama"""
-        for base_url in self.base_urls:
-            base_url = base_url.rstrip('/')
-            endpoints = [
-                ('/api/generate', lambda r: r.json().get("response", "")),
-                ('/v1/completions', lambda r: r.json().get("choices", [{}])[0].get("text", ""))
-            ]
-            
-            for endpoint, response_extractor in endpoints:
-                try:
-                    async with httpx.AsyncClient(timeout=30) as client:
-                        response = await client.post(
-                            f"{base_url}{endpoint}",
-                            json={"model": self.model, "prompt": prompt}
-                        )
-                        response.raise_for_status()
-                        result = response_extractor(response)
-                        if result:
-                            return result
-                except:
-                    continue
-                
-        # Fallback to OpenAI if available
-        if settings.OPENAI_API_KEY:
-            try:
-                from openai import AsyncOpenAI
-                client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-                response = await client.completions.create(
-                    model="gpt-3.5-turbo-instruct",
-                    prompt=prompt,
-                    max_tokens=150
-                )
-                return response.choices[0].text
-            except Exception as e:
-                logger.error(f"Async OpenAI fallback failed: {e}")
-                
-        return "Error: All async LLM endpoints failed" 
+        """Send an async completion request to OpenAI"""
+        try:
+            client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+            response = await client.completions.create(
+                model="gpt-3.5-turbo-instruct",
+                prompt=prompt,
+                max_tokens=150
+            )
+            return response.choices[0].text
+        except Exception as e:
+            logger.error(f"Async OpenAI generate error: {e}")
+            return f"Error: OpenAI API error - {str(e)}" 

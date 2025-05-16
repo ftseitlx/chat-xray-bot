@@ -19,14 +19,14 @@ class Settings(BaseSettings):
     # OpenAI API settings
     OPENAI_API_KEY: str
     
-    # Ollama settings
-    USE_LOCAL_LLM: bool = os.getenv("USE_LOCAL_LLM", "true").lower() == "true"
-    OLLAMA_URL: str = os.getenv("OLLAMA_URL", "http://llama2-ollama:11434")
-    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.2")
+    # Ollama settings - disabled
+    USE_LOCAL_LLM: bool = False  # Disable local LLM
+    OLLAMA_URL: str = ""  # Empty to avoid connection attempts
+    OLLAMA_MODEL: str = ""  # Empty to avoid usage
     
     # Default model configurations
     PRIMARY_MODEL: str = "gpt-3.5-turbo"
-    META_MODEL: str = "gpt-4-turbo"  # Using GPT-4 Turbo with 128K token context window
+    META_MODEL: str = "gpt-3.5-turbo"  # Using the cheapest model for meta analysis too
     
     # Webhook settings (for production)
     WEBHOOK_HOST: Optional[str] = None
