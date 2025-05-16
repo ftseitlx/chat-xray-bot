@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies for WeasyPrint
+# Install system dependencies for WeasyPrint and other tools
 RUN apt-get update && apt-get install -y \
     build-essential \
     python3-dev \
@@ -46,28 +46,67 @@ RUN mkdir -p uploads reports && chmod 777 uploads reports
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+ENV OLLAMA_HOST=${OLLAMA_HOST:-localhost}
+ENV OLLAMA_PORT=${OLLAMA_PORT:-11434}
+ENV WEASYPRINT_VERSION=60.1
 
 # Create a startup script with better error handling
 RUN echo '#!/bin/bash\n\
 set -e\n\
 echo "Starting Chat X-Ray Bot..."\n\
 echo "Python version: $(python --version)"\n\
+\n\
+# Function to check if a service is ready\n\
+wait_for_service() {\n\
+    local host=$1\n\
+    local port=$2\n\
+    local service=$3\n\
+    local max_attempts=30\n\
+    local attempt=1\n\
+    \n\
+    echo "Waiting for $service to be ready..."\n\
+    while ! curl -s http://$host:$port > /dev/null; do\n\
+        if [ $attempt -eq $max_attempts ]; then\n\
+            echo "$service is not available after $max_attempts attempts"\n\
+            return 1\n\
+        fi\n\
+        echo "Waiting for $service... attempt $attempt/$max_attempts"\n\
+        sleep 2\n\
+        attempt=$((attempt + 1))\n\
+    done\n\
+    echo "$service is ready!"\n\
+}\n\
+\n\
+# Check if Ollama is available\n\
+if [ -n "$OLLAMA_HOST" ] && [ -n "$OLLAMA_PORT" ]; then\n\
+    wait_for_service $OLLAMA_HOST $OLLAMA_PORT "Ollama"\n\
+fi\n\
+\n\
 echo "Checking directories:"\n\
 ls -la /app\n\
 echo "Uploads directory:"\n\
 ls -la /app/uploads\n\
 echo "Reports directory:"\n\
 ls -la /app/reports\n\
+\n\
 echo "Checking key environment variables:"\n\
 echo "BOT_TOKEN set: $(if [ -n "$BOT_TOKEN" ]; then echo YES; else echo NO; fi)"\n\
 echo "OPENAI_API_KEY set: $(if [ -n "$OPENAI_API_KEY" ]; then echo YES; else echo NO; fi)"\n\
 echo "WEBHOOK_HOST set: $(if [ -n "$WEBHOOK_HOST" ]; then echo YES; else echo NO; fi)"\n\
 echo "PORT set: $(if [ -n "$PORT" ]; then echo YES - $PORT; else echo NO; fi)"\n\
-echo "OLLAMA_URL set: $(if [ -n "$OLLAMA_URL" ]; then echo YES - $OLLAMA_URL; else echo NO; fi)"\n\
-echo "OLLAMA_MODEL set: $(if [ -n "$OLLAMA_MODEL" ]; then echo YES - $OLLAMA_MODEL; else echo NO; fi)"\n\
+echo "OLLAMA_HOST set: $(if [ -n "$OLLAMA_HOST" ]; then echo YES - $OLLAMA_HOST; else echo NO; fi)"\n\
+echo "OLLAMA_PORT set: $(if [ -n "$OLLAMA_PORT" ]; then echo YES - $OLLAMA_PORT; else echo NO; fi)"\n\
+\n\
 echo "Starting bot in webhook mode, binding to port ${PORT:-8000}..."\n\
-# Make sure we use the right port\n\
 export PORT=${PORT:-8000}\n\
+\n\
+# Run tests before starting the application\n\
+echo "Running tests..."\n\
+python -m pytest tests/ -v || {\n\
+    echo "Tests failed!"\n\
+    exit 1\n\
+}\n\
+\n\
 # Starting the application\n\
 exec python -m app.bot\n' > /app/start.sh && chmod +x /app/start.sh
 
