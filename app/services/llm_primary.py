@@ -11,9 +11,8 @@ from openai import AsyncOpenAI
 
 from app.config import settings
 
-# Optional local Llama wrapper
-USE_LOCAL_LLM = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
-if USE_LOCAL_LLM:
+# Import local Llama wrapper if enabled
+if settings.USE_LOCAL_LLM:
     from app.services.local_llm import analyse_chunk_with_llama
 
 logger = logging.getLogger(__name__)
@@ -79,7 +78,7 @@ PRIMARY_PROMPT = """
 
 async def process_chunk(chunk: List[Dict[str, Any]], max_retries: int = 3) -> Tuple[List[Dict[str, Any]], int]:
     """
-    Process a single chunk of messages using GPT-3.5-turbo.
+    Process a single chunk of messages using either local Llama or GPT-3.5-turbo.
     
     Args:
         chunk: List of message dictionaries
@@ -88,19 +87,28 @@ async def process_chunk(chunk: List[Dict[str, Any]], max_retries: int = 3) -> Tu
     Returns:
         Tuple containing the list of processed message dictionaries with analysis and the number of tokens used
     """
-    # If local Llama mode enabled, route chunk to Ollama and skip OpenAI completely
-    if USE_LOCAL_LLM:
+    # If local Llama mode enabled, route chunk to Ollama
+    if settings.USE_LOCAL_LLM:
         try:
             chunk_text = "\n\n".join(m["raw"] for m in chunk)
+            logger.info(f"Processing chunk with local Llama model: {settings.OLLAMA_MODEL}")
             llama_result = await analyse_chunk_with_llama(chunk_text)
-            # Normalize to list-of-dicts shape expected downstream
-            if isinstance(llama_result, list):
-                return llama_result, 0
+            
+            if "error" in llama_result:
+                logger.error(f"Local Llama analysis failed: {llama_result['error']}")
+                if "details" in llama_result:
+                    logger.error(f"Error details: {llama_result['details']}")
+                # Fall through to OpenAI as safety net
             else:
-                return [llama_result], 0
+                # Normalize to list-of-dicts shape expected downstream
+                if isinstance(llama_result, list):
+                    return llama_result, 0
+                else:
+                    return [llama_result], 0
+                    
         except Exception as le:
-            logger.error(f"Local Llama analysis failed: {le}")
-            # fallthrough to OpenAI as safety net
+            logger.error(f"Local Llama analysis failed with exception: {le}")
+            # Fall through to OpenAI as safety net
 
     # Format the chat log for the OpenAI model
     chat_log = "\n\n".join([f"{msg['raw']}" for msg in chunk])

@@ -1,16 +1,11 @@
-import os
 import json
 import httpx
 import logging
 from typing import Dict, Any
 
+from app.config import settings
+
 logger = logging.getLogger(__name__)
-
-# Base URL to the Ollama instance. In Render we will inject environment variable OLLAMA_URL
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-
-# Model name – expect that the model is already pulled (llama2:7b-chat fits 8 GB RAM plan)
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama2:7b-chat")
 
 # System prompt that forces the model to output strict JSON we expect downstream
 SYSTEM_PROMPT = (
@@ -23,7 +18,7 @@ SYSTEM_PROMPT = (
 async def analyse_chunk_with_llama(text: str, timeout: int = 60) -> Dict[str, Any]:
     """Send the chunk to a local Ollama Llama2 chat model and parse JSON reply."""
     payload = {
-        "model": OLLAMA_MODEL,
+        "model": settings.OLLAMA_MODEL,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": text[:4096]},  # truncate to keep response fast
@@ -33,24 +28,40 @@ async def analyse_chunk_with_llama(text: str, timeout: int = 60) -> Dict[str, An
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.post(f"{OLLAMA_URL}/v1/chat", json=payload)
+            logger.info(f"Sending request to Ollama at {settings.OLLAMA_URL}")
+            r = await client.post(f"{settings.OLLAMA_URL}/v1/chat", json=payload)
             r.raise_for_status()
             raw_resp = r.json().get("message", {}).get("content", "")
+            logger.debug(f"Received response from Ollama: {raw_resp[:200]}...")
+    except httpx.ConnectError as e:
+        logger.error(f"Failed to connect to Ollama at {settings.OLLAMA_URL}: {e}")
+        return {"error": "connection_failed", "details": str(e)}
+    except httpx.TimeoutException as e:
+        logger.error(f"Request to Ollama timed out after {timeout}s: {e}")
+        return {"error": "timeout", "details": str(e)}
+    except httpx.HTTPError as e:
+        logger.error(f"HTTP error from Ollama: {e}")
+        return {"error": "http_error", "details": str(e)}
     except Exception as e:
-        logger.error(f"Ollama request failed: {e}")
-        return {"error": "llama_request_failed", "details": str(e)}
+        logger.error(f"Unexpected error during Ollama request: {e}")
+        return {"error": "unexpected_error", "details": str(e)}
 
     # Attempt to parse JSON strictly
     try:
-        return json.loads(raw_resp)
+        result = json.loads(raw_resp)
+        logger.info("Successfully parsed JSON response from Ollama")
+        return result
     except json.JSONDecodeError:
         # Fallback: try to extract first JSON object
         import re
         m = re.search(r"\{.*\}", raw_resp, re.S)
         if m:
             try:
-                return json.loads(m.group(0))
-            except Exception:
-                pass
+                result = json.loads(m.group(0))
+                logger.info("Successfully extracted and parsed JSON from response")
+                return result
+            except Exception as e:
+                logger.error(f"Failed to parse extracted JSON: {e}")
+        
         logger.warning("Failed to parse JSON from Llama response: %s", raw_resp[:200])
         return {"error": "invalid_json", "raw": raw_resp[:500]} 

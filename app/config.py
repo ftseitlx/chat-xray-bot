@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     # OpenAI API settings
     OPENAI_API_KEY: str
     
+    # Ollama settings
+    USE_LOCAL_LLM: bool = os.getenv("USE_LOCAL_LLM", "true").lower() == "true"
+    OLLAMA_URL: str = os.getenv("OLLAMA_URL", "http://llama2-ollama:11434")
+    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama2:7b-chat")
+    
     # Default model configurations
     PRIMARY_MODEL: str = "gpt-3.5-turbo"
     META_MODEL: str = "gpt-4-turbo"  # Using GPT-4 Turbo with 128K token context window
