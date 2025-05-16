@@ -1,0 +1,10 @@
+# Dockerfile.ollama – image for private Ollama Llama service on Render
+FROM ollama/ollama:latest
+
+# Pre-pull the smallest viable chat model (fits 2-4 GB RAM plans)
+RUN ollama pull llama2:7b-chat
+
+EXPOSE 11434
+
+# Start Ollama on the default port explicitly
+CMD ["ollama", "serve", "-p", "11434"] 
