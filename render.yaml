@@ -33,6 +33,9 @@ services:
         value: http://llama2-ollama:11434
       - key: OLLAMA_MODEL
         value: llama2:7b-chat
+    dependsOn:
+      - name: llama2-ollama
+        type: private_service
 
   - type: private_service
     name: llama2-ollama
@@ -41,6 +44,8 @@ services:
     dockerfilePath: Dockerfile.ollama
     port: 11434
     autoDeploy: true
+    healthCheckPath: /api/version
+    healthCheckTimeout: 300
     disk:
       name: ollama-cache
       mountPath: /root/.ollama
