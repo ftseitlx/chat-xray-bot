@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     
     # Default model configurations
     PRIMARY_MODEL: str = "gpt-3.5-turbo"
-    META_MODEL: str = "gpt-3.5-turbo"  # Using the cheapest model for meta analysis too
+    META_MODEL: str = "gpt-4-turbo"  # Using GPT-4-turbo for detailed meta analysis
     
     # Webhook settings (for production)
     WEBHOOK_HOST: Optional[str] = None
@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     ENABLE_COST_TRACKING: bool = True
     
     # Token and rate limit settings
-    MAX_MESSAGES_FOR_META: int = int(os.getenv("MAX_MESSAGES_FOR_META", 100))
+    MAX_MESSAGES_FOR_META: int = int(os.getenv("MAX_MESSAGES_FOR_META", 400))
     
     # Rate limit handling
     ENABLE_RETRY_ON_RATE_LIMIT: bool = os.getenv("ENABLE_RETRY_ON_RATE_LIMIT", "true").lower() == "true"

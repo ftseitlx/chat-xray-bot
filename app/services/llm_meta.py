@@ -356,7 +356,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
     estimated_tokens = estimate_tokens(results_json)
 
     # Iteratively shrink until we are under the budget
-    minimal_sample_size = 90
+    minimal_sample_size = 200
     current_target_size = len(results_to_process_clean)
     while estimated_tokens > target_token_budget and current_target_size > minimal_sample_size:
         current_target_size = max(minimal_sample_size, int(current_target_size * 0.8))
@@ -715,7 +715,7 @@ async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int
                 logger.warning("Context length exceeded, trying with a minimal sample")
                 
                 # Use a much smaller sample for this retry
-                minimal_sample_size = 90
+                minimal_sample_size = 200
                 minimal_sample = get_balanced_sample(results, minimal_sample_size)
                 results_json = json.dumps(minimal_sample, indent=None, ensure_ascii=False)
                 
