@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -18,6 +18,8 @@ RUN apt-get update && apt-get install -y \
     shared-mime-info \
     wkhtmltopdf \
     curl \
+    software-properties-common \
+    git \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -40,6 +42,10 @@ COPY . .
 
 # Create directories for uploads and reports and ensure proper permissions
 RUN mkdir -p uploads reports && chmod 777 uploads reports
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
 
 # Create a startup script with better error handling
 RUN echo '#!/bin/bash\n\
