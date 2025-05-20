@@ -1,6 +1,7 @@
 import json
 import logging
 import time
+import asyncio
 from typing import List, Dict, Any, Tuple
 
 import openai
@@ -35,9 +36,9 @@ META_PROMPT = """
 - психологические_потребности
 - ключевые_цитаты (key_quotes)
 
-На основе этих данных создайте ПОДРОБНЫЙ и ГЛУБОКИЙ психологический отчет в формате HTML ПОЛНОСТЬЮ НА РУССКОМ ЯЗЫКЕ. Отчет должен быть исключительно детальным, с большим количеством цитат и проницательным анализом:
+На основе этих данных создайте ПОДРОБНЫЙ и ГЛУБОКИЙ психологический отчет в формате HTML ПОЛНОСТЬЮ НА РУССКОМ ЯЗЫКЕ. Отчет должен быть исключительно детальным, с большим количеством цитат и проницательным анализом. Он будет состоять из следующих разделов:
 
-1. **Общий обзор** (минимум 600 слов): 
+1. **Общий обзор** (минимум 600 слов):
    - Подробная оценка динамики отношений с обширными примерами
    - Глубокий анализ с точки зрения теории привязанности Габора Мате
    - Оценка стабильности отношений во времени
@@ -65,7 +66,7 @@ META_PROMPT = """
    - МИНИМУМ 60 наиболее значимых цитат из разговора, демонстрирующих ключевые аспекты отношений
    - Каждая цитата должна сопровождаться глубоким психологическим анализом (минимум 50 слов на каждую)
    - Распределение цитат должно быть равномерным между всеми участниками беседы
-   - ВАЖНО: Если в данных есть поле с дополнительными цитатами, ОБЯЗАТЕЛЬНО включите их в этот раздел
+   - ВАЖНО: Если в данных есть поле с дополнительными цитатами (передаются в `quotes_prompt`), ОБЯЗАТЕЛЬНО включите их в этот раздел
    - Для каждой цитаты указывайте автора, эмоцию и стиль коммуникации
    - Оформляйте цитаты в отдельных блоках с классом "quote" для лучшей визуализации
 
@@ -81,11 +82,15 @@ META_PROMPT = """
    - Конкретные упражнения и техники для применения в повседневной жизни
    - Специфические рекомендации для каждого участника отдельно
 
-8. **Количественный анализ** (новый раздел):
-   - Подробное описание всех количественных показателей, выявленных в анализе
-   - Процентное соотношение различных паттернов коммуникации
-   - Динамика изменения эмоционального фона с течением времени
-   - Сравнительный анализ участников по психологическим метрикам
+8. **Количественный анализ и Визуализация Данных**:
+   - В этом разделе предоставьте текстовый анализ и ключевые выводы для следующих типов визуализаций. Графики будут созданы программно и вставлены в HTML на место соответствующих заполнителей (`<p class="chart-placeholder">...</p>`). Используйте данные из `AGG_METRICS` и `results_json` для вашего анализа.
+   - **8.1. Анализ временной шкалы настроений**: Опишите эмоциональные колебания каждого участника с течением времени, ссылаясь на данные, которые будут визуализированы.
+   - **8.2. Анализ коммуникационных метрик (Лепестковая диаграмма)**: Для каждого участника проанализируйте ключевые коммуникационные метрики (токсичность, манипулятивность, позитивность, ассертивность, эмпатия, эмоциональная регуляция), которые будут отображены на лепестковой диаграмме.
+   - **8.3. Анализ распределения коммуникационных паттернов (Гистограммы)**: Опишите распределение стилей коммуникации для каждого участника.
+   - **8.4. Анализ тепловой карты эмоциональной динамики**: Проанализируйте общую эмоциональную интенсивность и ее изменения в разные периоды беседы.
+   - **8.5. Анализ "Четырех Всадников" Готтмана (График присутствия)**: Обсудите частоту появления каждого из "Всадников" и общий риск для отношений.
+   - **8.6. Анализ трансакционных взаимодействий (Диаграмма Санкей)**: Опишите потоки взаимодействий между эго-состояниями (Родитель-Ребенок, Взрослый-Взрослый и т.д.).
+   - **8.7. Анализ динамики психологических потребностей**: Обсудите, как меняются выраженные психологические потребности с течением диалога.
 
 9. **Индивидуальный психологический портрет каждого участника** (минимум 500 слов на участника):
    - Для КАЖДОГО собеседника создайте отдельный под-раздел
@@ -93,710 +98,429 @@ META_PROMPT = """
    - Привяжите анализ к КОНКРЕТНЫМ цитатам (укажите номера/текст цитат из раздела 5)
    - Опишите сильные стороны, уязвимости и ключевые триггеры
 
-## ГРАФИЧЕСКАЯ ВИЗУАЛИЗАЦИЯ (улучшенная и расширенная):
-
-1. **График временной шкалы настроений**:
-   - Создайте ДЕТАЛЬНЫЙ интерактивный график, показывающий эмоциональные колебания каждого участника с течением времени
-   - Используйте реальные количественные данные из анализа
-   - Включите маркеры ключевых моментов с подписями
-   - Используйте HTML/CSS для создания графика с градиентной цветовой схемой
-
-2. **Лепестковая диаграмма коммуникационных метрик**:
-   - Создайте для КАЖДОГО участника лепестковую диаграмму, отображающую следующие метрики:
-     - Токсичность (средний показатель)
-     - Манипулятивность (средний показатель)
-     - Позитивность (процентное соотношение)
-     - Ассертивность (процентное соотношение)
-     - Эмпатия (рассчитанный показатель)
-     - Эмоциональная регуляция (рассчитанный показатель)
-   - Используйте точные количественные показатели из анализа данных
-
-3. **Гистограммы распределения коммуникационных паттернов**:
-   - Создайте детальную гистограмму для каждого участника, показывающую распределение стилей коммуникации
-   - Включите процентные соотношения и абсолютные значения
-   - Добавьте сравнительный график между участниками
-
-4. **Тепловая карта эмоциональной динамики**:
-   - Создайте тепловую карту на основе сентимент-анализа всего разговора
-   - Визуализируйте эмоциональную интенсивность в разные периоды беседы
-   - Используйте градиентную цветовую шкалу для отображения интенсивности эмоций
-
-5. **График присутствия "Четырех Всадников" Готтмана**:
-   - Визуализируйте частоту появления каждого из "Четырех Всадников" на протяжении разговора
-   - Создайте сравнительную диаграмму между участниками
-   - Включите индикатор общего риска для отношений на основе методики Готтмана
-
-6. **Диаграмма Санкей трансакционных взаимодействий**:
-   - Создайте диаграмму Санкей, отображающую потоки взаимодействий между эго-состояниями
-   - Визуализируйте, как часто встречаются различные комбинации взаимодействий (Родитель-Ребенок, Взрослый-Взрослый и т.д.)
-   - Используйте ширину потоков для отображения частоты взаимодействий
-
-7. **График динамики психологических потребностей**:
-   - Визуализируйте, как меняются выраженные психологические потребности с течением диалога
-   - Отметьте удовлетворенные и неудовлетворенные потребности разными цветами
-   - Включите метрики выражения потребностей для каждого участника
-
-## РЕКОМЕНДАЦИИ ПО СТИЛЮ:
-
+## РЕКОМЕНДАЦИИ ПО СТИЛЮ HTML:
 1. Используйте профессиональный, чистый дизайн с успокаивающей цветовой схемой.
-2. Включите ВСЕ перечисленные выше графики и визуальные элементы, используя встроенный в HTML JavaScript и CSS.
-3. Используйте адекватные размеры шрифта, отступы и поля для удобочитаемости.
-4. HTML должен быть полностью автономным со встроенным CSS и JavaScript (без внешних зависимостей).
-5. ОБЯЗАТЕЛЬНО реализуйте графики и диаграммы, используя встроенный SVG и CSS.
-6. Сделайте отчет похожим на профессиональный психологический анализ высшего уровня.
-7. Включите заголовок с названием "Chat X-Ray: Подробный психологический анализ отношений" и текущей датой.
-8. Для раздела "Ключевые цитаты" используйте следующий HTML шаблон для каждой цитаты:
-   ```html
+2. Используйте адекватные размеры шрифта, отступы и поля для удобочитаемости.
+3. HTML должен быть полностью автономным со встроенным CSS (без внешних зависимостей JavaScript, если это не для графиков).
+4. Сделайте отчет похожим на профессиональный психологический анализ высшего уровня.
+5. Включите заголовок с названием "Chat X-Ray: Подробный психологический анализ отношений" и текущей датой.
+6. Для раздела "Ключевые цитаты" используйте следующий HTML шаблон для каждой цитаты:
+   \`\`\`html
    <div class="quote">
      <p>"Текст цитаты здесь"</p>
      <p class="quote-author">Автор цитаты</p>
      <p class="quote-emotion">Эмоция: [эмоция] | Стиль общения: [стиль]</p>
      <p>Психологический анализ: [ваш анализ цитаты]</p>
    </div>
-   ```
+   \`\`\`
+   Местозаполнители для графиков будут иметь вид `<p class="chart-placeholder">Здесь будет график...</p>`. Ваша задача - предоставить текстовый контент ВОКРУГ этих местозаполнителей.
 
 ## КЛЮЧЕВЫЕ ТРЕБОВАНИЯ:
 1. ОБЯЗАТЕЛЬНО ПИШИТЕ ВЕСЬ ТЕКСТ ОТЧЕТА НА РУССКОМ ЯЗЫКЕ БЕЗ ИСКЛЮЧЕНИЙ.
-2. Используйте ТОЧНЫЕ количественные показатели из данных для создания всех графиков и диаграмм.
-3. Включите МИНИМУМ 60 содержательных цитат с подробным анализом.
-4. Общий объём отчёта — не менее 3 500 слов (≈ 4 страниц A4).
-5. Сделайте отчёт МАКСИМАЛЬНО ГЛУБОКИМ и ПРОНИЦАТЕЛЬНЫМ, как если бы его подготовил ведущий эксперт в психологии отношений.
-6. ВСЕ ГРАФИКИ ДОЛЖНЫ БЫТЬ СОЗДАНЫ на основе РЕАЛЬНЫХ ДАННЫХ анализа и находиться прямо в HTML (SVG/CSS/JS).
-7. ОБЯЗАТЕЛЬНО включите ВСЕ цитаты, которые были предоставлены в дополнительных данных, даже если они отсутствуют в основной выборке.
-8. СТРОГО ЗАПРЕЩЕНО придумывать или искажать цитаты — используйте ТОЛЬКО фактические цитаты из предоставленных данных.
-9. Убедитесь, что итоговый HTML легко конвертируется в PDF без потери форматирования.
-10. Включите отдельный под-раздел для КАЖДОГО участника с подробным психологическим портретом, с обязательными ссылками на приведённые цитаты.
+2. Используйте ТОЧНЫЕ количественные показатели из предоставленных данных (`results_json`, `AGG_METRICS`) для вашего анализа и особенно для раздела "Количественный анализ и Визуализация Данных".
+3. Включите МИНИМУМ 60 содержательных цитат с подробным анализом в Разделе 5.
+4. Общий объём отчёта — не менее 3 500 слов.
+5. Сделайте отчёт МАКСИМАЛЬНО ГЛУБОКИМ и ПРОНИЦАТЕЛЬНЫМ.
+6. ОБЯЗАТЕЛЬНО включите ВСЕ цитаты, которые были предоставлены в дополнительных данных (`quotes_prompt`), даже если они отсутствуют в основной выборке `results_json`.
+7. СТРОГО ЗАПРЕЩЕНО придумывать или искажать цитаты — используйте ТОЛЬКО фактические цитаты.
+8. Убедитесь, что итоговый HTML легко конвертируется в PDF без потери форматирования.
+9. Включите отдельный под-раздел для КАЖДОГО участника с подробным психологическим портретом.
 
-Ваш вывод должен быть ТОЛЬКО допустимым HTML (со встроенным CSS и JavaScript), который можно напрямую преобразовать в PDF.
+Ваш вывод должен быть ТОЛЬКО допустимым HTML (со встроенным CSS), который можно напрямую преобразовать в PDF. Начните с `<!DOCTYPE html>`.
 """
 
 
 async def generate_meta_report(results: List[Dict[str, Any]], total_messages:int, max_retries: int = 3) -> Tuple[str, int]:
     """
-    Generate a meta report from the analysis results using GPT-4 Turbo.
-    
-    Args:
-        results: List of analyzed message dictionaries
-        total_messages: Total number of messages in the chat
-        max_retries: Maximum number of retries on rate limit errors
-        
-    Returns:
-        Tuple containing HTML string for the report and tokens used for the report
+    Generate a meta report from the analysis results using a single call to settings.META_MODEL.
     """
-    # Calculate approximate token count for the dataset
     def estimate_tokens(data_str: str) -> int:
-        # Each character is approximately 0.25 tokens for UTF-8 text
-        return int(len(data_str) * 0.25)
-    
-    # Function to get a balanced sample from messages
+        return int(len(data_str) * 0.25) # Rough estimate
+
     def get_balanced_sample(msgs, target_size):
+        if not msgs or target_size <= 0:
+            return []
         if len(msgs) <= target_size:
             return msgs
-            
-        # Calculate how many messages to take from each section
-        section_size = target_size // 3
-        
-        # Ensure we have at least some messages from each section
+        section_size = max(1, target_size // 3)
         first_section = msgs[:section_size]
-        
-        # For middle section, pick from the actual middle
         middle_start = max(section_size, len(msgs) // 2 - section_size // 2)
-        middle_end = min(middle_start + section_size, len(msgs))
+        middle_end = min(middle_start + section_size, len(msgs) - section_size) # Ensure space for last_section
         middle_section = msgs[middle_start:middle_end]
+        # Adjust last_section size if middle_section was smaller than expected
+        remaining_for_last = target_size - (len(first_section) + len(middle_section))
+        actual_last_section_size = max(0, min(section_size, remaining_for_last, len(msgs) - (middle_end if middle_section else section_size)))
+
+        last_section = msgs[-actual_last_section_size:] if actual_last_section_size > 0 else []
         
-        # Last section
-        last_section = msgs[-section_size:]
-        
-        return first_section + middle_section + last_section
-    
-    # Extract key quotes from all messages for preservation
+        # Ensure sections don't overlap for very small target_size relative to msgs length
+        # This simple concatenation might lead to fewer than target_size if actual_last_section_size becomes 0
+        # or if sections overlap due to rounding. A more robust sampling might be needed for edge cases.
+        # However, for typical use (target_size much smaller than len(msgs)), this should be fine.
+        sampled_msgs = first_section + middle_section + last_section
+        # If still over target, truncate
+        return sampled_msgs[:target_size]
+
+
     def extract_key_quotes(msgs):
         quotes = []
         for msg in msgs:
             if "key_quotes" in msg and msg["key_quotes"]:
-                for quote in msg["key_quotes"]:
-                    if quote and len(quote) > 5:  # Ensure it's a meaningful quote
+                for quote_text in msg["key_quotes"]: # Assuming key_quotes is a list of strings
+                    if quote_text and len(quote_text) > 5:
                         quotes.append({
-                            "quote": quote,
+                            "quote": quote_text,
                             "author": msg.get("author", "Unknown"),
-                            "sentiment": msg.get("sentiment", "neutral"),
+                            "sentiment": msg.get("sentiment_score", 0), # Use score for consistency
                             "emotion": msg.get("emotion", "unknown")
                         })
         return quotes
-    
-    # We're using GPT-4 Turbo which has a 128K token context window,
-    # but we need to be more careful with sampling for large chats
-    
-    # Extract all key quotes from the original results for preservation
-    all_key_quotes = extract_key_quotes(results)
-    logger.info(f"Extracted {len(all_key_quotes)} key quotes for preservation")
-    
-    # -------------------------------------------------
-    #  Compute aggregated quantitative metrics per author
-    # -------------------------------------------------
-    from collections import defaultdict
 
+    all_key_quotes = extract_key_quotes(results)
+    logger.info(f"Extracted {len(all_key_quotes)} key quotes for preservation.")
+
+    from collections import defaultdict
     def compute_metrics_summary(msgs):
         per_author = defaultdict(lambda: defaultdict(list))
         for m in msgs:
             author = m.get("author", "Unknown")
-            # Core scalar fields to average
-            for field in [
-                "sentiment_score",
-                "toxicity",
-                "manipulation",
-                "empathy",
-                "assertiveness",
-                "emotion_intensity",
-            ]:
+            for field in ["sentiment_score", "toxicity", "manipulation", "empathy", "assertiveness", "emotion_intensity"]:
                 val = m.get(field)
-                if isinstance(val, (int, float)):
-                    per_author[author][field].append(val)
-
-            # Gottman horsemen breakdown
+                if isinstance(val, (int, float)): per_author[author][field].append(val)
             horsemen = m.get("gottman_horsemen", {})
             for hk, hv in (horsemen or {}).items():
-                if isinstance(hv, (int, float)):
-                    per_author[author][f"horsemen_{hk}"].append(hv)
-
-        summary = {}
-        for author, metrics in per_author.items():
-            summary[author] = {k: (sum(v)/len(v) if v else 0) for k, v in metrics.items()}
+                if isinstance(hv, (int, float)): per_author[author][f"horsemen_{hk}"].append(hv)
+        summary = {author: {k: (sum(v)/len(v) if v else 0) for k,v in metrics.items()} for author,metrics in per_author.items()}
         return summary
 
     metrics_summary = compute_metrics_summary(results)
-    # ---- Additional datasets for robust SVG графики ----
-    from datetime import datetime
-
-    def compute_timeline(msgs, bins: int = 24):
-        """Compute binned averages of key metrics along the dialogue timeline."""
-        if not msgs:
-            return []
-        total = len(msgs)
-        bin_size = max(1, total // bins)
-        timeline = []
-        for start_idx in range(0, total, bin_size):
-            segment = msgs[start_idx:start_idx + bin_size]
-            ts_start = segment[0].get("timestamp") if segment else None
-            ts_end = segment[-1].get("timestamp") if segment else None
-            per_author = defaultdict(lambda: defaultdict(list))
-            for m in segment:
-                author = m.get("author", "Unknown")
-                for fld in [
-                    "sentiment_score",
-                    "toxicity",
-                    "manipulation",
-                    "empathy",
-                    "assertiveness",
-                    "emotion_intensity",
-                ]:
-                    val = m.get(fld)
-                    if isinstance(val, (int, float)):
-                        per_author[author][fld].append(val)
-            entry = {
-                "bin": len(timeline) + 1,
-                "timestamp_start": ts_start,
-                "timestamp_end": ts_end,
-                "authors": {
-                    a: {k: (sum(v)/len(v) if v else 0) for k, v in adict.items()}
-                    for a, adict in per_author.items()
-                }
-            }
-            timeline.append(entry)
-            if len(timeline) >= bins:
-                break
-        return timeline
-
-    def compute_pattern_distribution(msgs):
-        """Count occurrences of communication patterns per author."""
-        dist = defaultdict(lambda: defaultdict(int))
-        for m in msgs:
-            author = m.get("author", "Unknown")
-            pattern = m.get("communication_pattern")
-            if pattern:
-                dist[author][pattern] += 1
-        return dist
-
-    timeline_data = compute_timeline(results, bins=24)
-    pattern_distribution = compute_pattern_distribution(results)
-
-    data_pack = {
-        "agg_metrics": metrics_summary,
-        "timeline": timeline_data,
-        "pattern_distribution": pattern_distribution,
-    }
-
-    metrics_json = json.dumps(data_pack, ensure_ascii=False)
     
-    # -------- Context window limits --------
-    # For GPT-4-Turbo (128 K) мы можем передавать ~90 К токенов данных,
-    # но для gpt-3.5-turbo-16k лимит всего ≈16 К. Чтобы избежать ошибок 400,
-    # динамически выбираем бюджет в зависимости от выбранной «быстрой» модели.
+    def compute_timeline(msgs, bins: int = 24):
+        if not msgs: return []
+        total_len = len(msgs)
+        bin_size = max(1, total_len // bins)
+        timeline_data = []
+        for i in range(0, total_len, bin_size):
+            segment = msgs[i:i + bin_size]
+            if not segment: continue
+            # Simplified: just pass segment for further processing if needed by SVG generator
+            # For this prompt, we only need AGG_METRICS mostly.
+            # The SVG generators use the more detailed metrics_summary and timeline_data.
+            # The LLM needs to refer to AGG_METRICS.
+        return [] # Placeholder, actual timeline_data for SVGs computed below
 
-    if "gpt-3.5" in getattr(settings, "FAST_META_MODEL", ""):  # 16k context
-        max_context_tokens = 15000
-        target_token_budget = 13000  # ~2k запас на промпт и ответ
-    else:
-        max_context_tokens = 110000  # Leave room for prompt and response
-        target_token_budget = 90000
+    # Data for programmatic SVGs
+    svg_timeline_data = compute_timeline(results, bins=24) # This was compute_timeline, let's keep it
+    
+    data_pack_for_llm = { # This is AGG_METRICS for the LLM
+        "agg_metrics_per_author": metrics_summary,
+        # Potentially add more aggregated data if useful for LLM's textual analysis of charts
+    }
+    metrics_json_for_llm = json.dumps(data_pack_for_llm, ensure_ascii=False, indent=2)
+
+    # Context window limits for settings.META_MODEL (GPT-4-Turbo)
+    # GPT-4-Turbo has 128K context. We want to use a good portion for results_json.
+    # Budget: META_PROMPT (~3-4K) + metrics_json_for_llm (~1-2K) + quotes_prompt (variable, up to ~5-10K for 200 quotes) + output (4K)
+    # Remaining for results_json: 128K - 4K - 2K - 10K - 4K = ~108K.
+    # Let's target around 50K-80K tokens for results_json to be safe and control costs.
+    # $1 budget for whole report. Primary analysis takes some. $0.60-$0.70 for meta.
+    # GPT-4-Turbo input $0.01/1K, output $0.03/1K.
+    # For $0.65: 0.01 * T_in/1000 + 0.03 * T_out/1000 = 0.65. If T_out=4K -> $0.12. So, 0.01*T_in/1000 = $0.53 => T_in = 53K tokens.
+    target_token_budget_for_results = 50000 # Target for the results_json string
 
     def strip_bulky_fields(msg_list):
-        """Return a deep-copied list with heavy fields removed."""
         cleaned = []
-        for m in msg_list:
-            m_copy = m.copy()
-            # Remove or truncate very large fields that are not essential
-            m_copy.pop("key_quotes", None)  # quotes will be handled separately
+        for m_dict in msg_list:
+            m_copy = m_dict.copy()
+            m_copy.pop("key_quotes", None) # Handled by all_key_quotes and quotes_prompt
+            # m_copy.pop("raw", None) # 'raw' might be too bulky if not strictly needed by META_PROMPT themes
             cleaned.append(m_copy)
         return cleaned
 
-    # Work with a cleaned copy for token estimation / sending
     results_to_process_clean = strip_bulky_fields(results)
-    results_json = json.dumps(results_to_process_clean, indent=None, ensure_ascii=False)
-    estimated_tokens = estimate_tokens(results_json)
+    temp_results_json = json.dumps(results_to_process_clean, indent=None, ensure_ascii=False)
+    estimated_tokens_for_results = estimate_tokens(temp_results_json)
 
-    # Iteratively shrink until we are under the budget
-    minimal_sample_size = 200
-    current_target_size = len(results_to_process_clean)
-    while estimated_tokens > target_token_budget and current_target_size > minimal_sample_size:
-        current_target_size = max(minimal_sample_size, int(current_target_size * 0.8))
-        results_to_process_clean = strip_bulky_fields(get_balanced_sample(results, current_target_size))
-        results_json = json.dumps(results_to_process_clean, indent=None, ensure_ascii=False)
-        estimated_tokens = estimate_tokens(results_json)
-        logger.info(f"Adaptive reduction: {current_target_size} msgs, est {estimated_tokens} tokens")
+    # Iteratively shrink results_to_process_clean until its JSON representation is under budget
+    # MAX_MESSAGES_FOR_META from config (400) is an initial cap before this token-based sampling.
+    # This loop further refines based on token budget.
+    current_max_messages = settings.MAX_MESSAGES_FOR_META 
+    results_to_process_sampled = get_balanced_sample(results_to_process_clean, current_max_messages)
+    
+    # Minimal sample size if aggressive reduction is needed
+    minimal_sample_size_fallback = 200 # User previously set this, let's use it as lower bound for adaptive.
 
-    # Ensure we operate with the cleaned, size-constrained data going forward
-    results_to_process = results_to_process_clean
+    # Adaptive reduction based on token budget
+    while estimate_tokens(json.dumps(results_to_process_sampled, indent=None, ensure_ascii=False)) > target_token_budget_for_results and \
+          len(results_to_process_sampled) > minimal_sample_size_fallback:
+        current_max_messages = max(minimal_sample_size_fallback, int(len(results_to_process_sampled) * 0.85))
+        results_to_process_sampled = get_balanced_sample(results_to_process_clean, current_max_messages) # Sample from the original cleaned full results
+        logger.info(f"Adaptive reduction: {len(results_to_process_sampled)} msgs, aiming for <{target_token_budget_for_results} tokens for results_json")
 
-    # Choose a cheaper/faster model for the less insight-heavy part of the report
-    fast_model = getattr(settings, "FAST_META_MODEL", "gpt-3.5-turbo-16k")
+    final_results_json_for_llm = json.dumps(results_to_process_sampled, indent=None, ensure_ascii=False)
+    logger.info(f"Final sample size for meta report: {len(results_to_process_sampled)} messages. Estimated tokens for results_json: {estimate_tokens(final_results_json_for_llm)}")
 
     retry_count = 0
-    backoff_time = settings.RETRY_DELAY_SECONDS  # Start with configured delay
+    backoff_time = settings.RETRY_DELAY_SECONDS
     
+    tokens_used_meta = 0
+    html_content = ""
+
     while retry_count <= max_retries:
         try:
-            # Preserve quotes if we had to reduce the dataset
-            quotes_prompt = ""
-            if len(results_to_process) < len(results) and all_key_quotes:
-                # Provide up to 200 quotes to ensure >60 real ones available
-                quotes_json = json.dumps(all_key_quotes[:200], indent=None, ensure_ascii=False)
-                quotes_prompt = f"""
-                ВАЖНО: Включите эти ключевые цитаты в раздел "Ключевые цитаты", даже если они не присутствуют в сокращенной выборке сообщений:
-                {quotes_json}
+            quotes_prompt_text = ""
+            if all_key_quotes: # Use all_key_quotes extracted from the original full 'results'
+                # Limit quotes to avoid excessive prompt length, e.g., max 200 quotes
+                quotes_to_include = all_key_quotes[:200]
+                quotes_json_for_prompt = json.dumps(quotes_to_include, indent=None, ensure_ascii=False)
+                quotes_prompt_text = f"""
+                ВАЖНО: Эти {len(quotes_to_include)} ключевых цитат были извлечены из полного анализа. ОБЯЗАТЕЛЬНО интегрируйте их и их анализ в Раздел 5 ("Ключевые цитаты"), даже если они не присутствуют в сокращенной выборке сообщений (`results_json`), которую вы получили.
+                {quotes_json_for_prompt}
                 """
             
-            async def _gpt_call(section_hint: str, include_doctype: bool, model_name: str = settings.META_MODEL) -> Tuple[str, int]:
-                """Helper to call GPT with a hint which sections to produce."""
-                sys_prompt = META_PROMPT + f"\nОГРАНИЧЕНИЕ: Сгенерируй ТОЛЬКО {section_hint}."
-                if not include_doctype:
-                    sys_prompt += " Не добавляй <!DOCTYPE html> и теги <html> <head>. Начни сразу с содержимого <body>."
-
-                resp = await client.chat.completions.create(
-                    model=model_name,
-                    messages=[
-                        {"role": "system", "content": sys_prompt},
-                        {
-                            "role": "user",
-                            "content": (
-                                f"НА ОСНОВЕ СЛЕДУЮЩИХ ДАННЫХ анализа сообщений (JSON):\n" \
-                                f"{results_json}\n\n" \
-                                f"AGG_METRICS:\n{metrics_json}\n\n" \
-                                f"{quotes_prompt}"
-                            ),
-                        },
-                    ],
-                    temperature=0.7,
-                    max_tokens=4096,
-                    n=1
-                )
-                content = resp.choices[0].message.content
-                t_used = resp.usage.total_tokens if hasattr(resp, "usage") and resp.usage else 0
-                return content, t_used
-
-            # --- First half (sections 1-4) ---
-            html_part1, tokens1 = await _gpt_call(
-                "разделы 1-4 (Обзор ≥600 слов, Паттерны ≥500, Эмоции ≥500, Токсичные взаимодействия ≥300)",
-                True,
-                model_name=fast_model
+            user_content = (
+                f"АНАЛИЗ ЧАТА ДЛЯ ОТЧЕТА:\n"
+                f"1. ДАННЫЕ АНАЛИЗА СООБЩЕНИЙ (ВЫБОРКА JSON):\n{final_results_json_for_llm}\n\n"
+                f"2. АГРЕГИРОВАННЫЕ МЕТРИКИ (AGG_METRICS JSON):\n{metrics_json_for_llm}\n\n"
+                f"3. ДОПОЛНИТЕЛЬНЫЕ КЛЮЧЕВЫЕ ЦИТАТЫ (quotes_prompt):\n{quotes_prompt_text}"
             )
 
-            # --- Second half (sections 5-9 + графика) ---
-            # Strengthen requirements for graphics in the second part
-            second_hint = (
-                "разделы 5-9 (Цитаты ≥60 шт с анализом ≥50 слов каждая, Инсайты ≥600 слов, Рекомендации ≥10 по 100+ слов, Количественный анализ, Индивидуальные портреты ≥500 слов/участник) "
-                "и ОБЯЗАТЕЛЬНО минимум 7 SVG графиков. Используй данные из AGG_METRICS, числа не выдумывай. "
-                "Каждый график должен иметь уникальный id вида 'chart-1', 'chart-2', ... и подпись. Не используй внешние библиотеки." 
+            logger.info(f"Attempting to generate meta report with {settings.META_MODEL}. Input estimate (results_json part): {estimate_tokens(final_results_json_for_llm)} tokens.")
+            
+            response = await client.chat.completions.create(
+                model=settings.META_MODEL,
+                messages=[
+                    {"role": "system", "content": META_PROMPT},
+                    {"role": "user", "content": user_content},
+                ],
+                temperature=0.7,
+                max_tokens=4096, # Standard max output, adjust if a different output length is consistently needed
+                n=1
             )
-            html_part2_raw, tokens2 = await _gpt_call(second_hint, False, model_name=settings.META_MODEL)
-
-            # --- Inject additional CSS for better readability ---
-            def _inject_css(html: str) -> str:
-                import re
-                style_block = """
-                <style>
-                    body { font-size: 17px; line-height: 1.8; }
-                    h2 { font-size: 24px; margin-top: 40px; }
-                    svg text { font-family: Arial, sans-serif; font-size: 14px; }
-                </style>
-                """
-                head_match = re.search(r"<head[^>]*>", html, re.IGNORECASE)
-                if head_match:
-                    insert_pos = head_match.end()
-                    html = html[:insert_pos] + style_block + html[insert_pos:]
-                return html
-
-            # Merge: insert part2 before </body>
-            import re
-            body_close_re = re.compile(r"</body>\s*</html>\s*$", re.IGNORECASE | re.DOTALL)
-            match = body_close_re.search(html_part1)
-            if match:
-                html_content = body_close_re.sub(html_part2_raw + match.group(0), html_part1)
+            html_content = response.choices[0].message.content
+            
+            if response.usage:
+                tokens_used_meta = response.usage.total_tokens
+                # If we need to separate input/output tokens for cost:
+                # tokens_input_meta = response.usage.prompt_tokens
+                # tokens_output_meta = response.usage.completion_tokens
             else:
-                # Fallback – just concatenate
-                html_content = html_part1 + html_part2_raw
+                tokens_used_meta = 0 # Fallback
 
-            # Inject additional CSS for better readability
-            html_content = _inject_css(html_content)
+            logger.info(f"Meta report generated. Tokens used: {tokens_used_meta}")
+            break # Success
 
-            # Decode any HTML numeric character references to ensure proper Cyrillic output
-            import html as _html_module
-            html_content = _html_module.unescape(html_content)
-
-            tokens_used_meta = tokens1 + tokens2
-            
-            # Strip any leading non-HTML text the model might have added (e.g. "Конечно, вот отчёт:")
-            import re
-            leading_html_match = re.search(r'(<!DOCTYPE html[\s\S]*|<html[\s\S]*)', html_content, re.IGNORECASE)
-            if leading_html_match:
-                html_content = leading_html_match.group(1).lstrip()
-
-            # Basic validation - check if it looks like HTML (case-insensitive)
-            _html_start = html_content.lstrip()[:40].lower()
-            if not (_html_start.startswith("<!doctype html") or _html_start.startswith("<html")):
-                # Try to extract an HTML block if the model included additional text before/after
-                html_match = re.search(r'(<html[\s\S]*?</html>)', html_content, re.IGNORECASE)
-                if html_match:
-                    html_content = html_match.group(1)
-                else:
-                    # Wrap the content in basic HTML if needed
-                    html_content = f"""
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <meta charset="UTF-8">
-                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                        <title>Chat X-Ray: Психологический анализ отношений</title>
-                        <style>
-                            body {{ font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }}
-                            h1 {{ color: #2c3e50; text-align: center; margin-bottom: 30px; }}
-                            h2 {{ color: #3498db; margin-top: 30px; border-bottom: 1px solid #eee; padding-bottom: 10px; }}
-                            .section {{ margin-bottom: 30px; }}
-                            .quote {{ font-style: italic; border-left: 3px solid #3498db; padding: 15px; margin: 15px 0; background-color: #f8f9fa; }}
-                            .quote-author {{ font-weight: bold; margin-top: 5px; color: #555; }}
-                            .quote-emotion {{ color: #777; font-size: 0.9em; margin-top: 5px; }}
-                            .recommendation {{ background-color: #f0f7fb; padding: 15px; border-radius: 5px; margin-bottom: 10px; border-left: 5px solid #3498db; }}
-                            .chart {{ background-color: #f5f5f5; padding: 10px; border-radius: 5px; margin: 20px 0; height: 300px; display: flex; justify-content: center; align-items: center; }}
-                            .chart-placeholder {{ color: #777; font-style: italic; }}
-                            .positive {{ color: #27ae60; }}
-                            .negative {{ color: #e74c3c; }}
-                            .neutral {{ color: #7f8c8d; }}
-                            table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
-                            th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }}
-                            th {{ background-color: #f2f2f2; }}
-                        </style>
-                    </head>
-                    <body>
-                        <h1>Chat X-Ray: Психологический анализ отношений</h1>
-                        
-                        <div class="section">
-                            <h2>Общий обзор</h2>
-                            <p>Данный отчет содержит психологический анализ предоставленного чата, основываясь на теориях Габора Мате, Джона Готтмана и других психологов.</p>
-                            {html_content}
-                        </div>
-                        
-                        <div class="section">
-                            <h2>Паттерны общения</h2>
-                            <p>В данном разделе представлен анализ основных паттернов общения между участниками беседы.</p>
-                            <div class="chart">
-                                <p class="chart-placeholder">Здесь будет отображаться график коммуникационных паттернов.</p>
-                            </div>
-                        </div>
-                        
-                        <div class="section">
-                            <h2>Анализ эмоций</h2>
-                            <p>Анализ эмоционального фона беседы и динамики эмоций участников.</p>
-                            <div class="chart">
-                                <p class="chart-placeholder">Здесь будет отображаться график эмоционального состояния.</p>
-                            </div>
-                        </div>
-                        
-                        <div class="section">
-                            <h2>Ключевые цитаты</h2>
-                            <p>Наиболее значимые цитаты из беседы с психологическим анализом:</p>
-                            <div class="quote">
-                                <p>"Пример цитаты из беседы, которая демонстрирует важный психологический аспект отношений."</p>
-                                <p class="quote-author">Автор цитаты</p>
-                                <p class="quote-emotion">Эмоция: радость | Стиль общения: ассертивный</p>
-                                <p>Психологический анализ: Данная цитата демонстрирует открытость в общении и стремление к установлению эмоциональной связи.</p>
-                            </div>
-                            <div class="quote">
-                                <p>"Еще один пример значимой цитаты из беседы."</p>
-                                <p class="quote-author">Другой участник</p>
-                                <p class="quote-emotion">Эмоция: грусть | Стиль общения: пассивный</p>
-                                <p>Психологический анализ: В этой цитате проявляется неуверенность и страх отвержения, характерные для тревожного стиля привязанности.</p>
-                            </div>
-                        </div>
-                        
-                        <div class="section">
-                            <h2>Психологические инсайты</h2>
-                            <p>Психологические наблюдения на основе трансакционного анализа и теории привязанности.</p>
-                        </div>
-                        
-                        <div class="section">
-                            <h2>Рекомендации</h2>
-                            <div class="recommendation">
-                                <p>Рекомендация 1: Улучшить коммуникацию и практиковать активное слушание, чтобы лучше понимать потребности друг друга.</p>
-                            </div>
-                            <div class="recommendation">
-                                <p>Рекомендация 2: Обратить внимание на эмоциональные триггеры и практиковать осознанность в моменты напряжения.</p>
-                            </div>
-                            <div class="recommendation">
-                                <p>Рекомендация 3: Использовать технику "Я-сообщений" вместо обвинений для выражения своих чувств и потребностей.</p>
-                            </div>
-                            <div class="recommendation">
-                                <p>Рекомендация 4: Выделять специальное время для обсуждения важных вопросов, избегая спонтанных серьезных разговоров в неподходящее время.</p>
-                            </div>
-                            <div class="recommendation">
-                                <p>Рекомендация 5: Регулярно выражать признательность и благодарность друг другу, укрепляя позитивную связь.</p>
-                            </div>
-                        </div>
-                    </body>
-                    </html>
-                    """
-            
-            # Add 'viewport' meta tag if it's not already present
-            if "<meta name=\"viewport\"" not in html_content:
-                html_content = html_content.replace("<head>", 
-                    "<head>\n        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">")
-                
-            # Add sampling disclaimer if applicable
-            if len(results_to_process) < len(results):
-                # Add a note about sampling at the top of the report
-                import re
-                
-                # Try to find where to insert our sampling notice
-                body_pattern = r'<body[^>]*>'
-                if re.search(body_pattern, html_content):
-                    # Insert after the body tag
-                    sampling_notice = f"""
-                    <div style="background-color: #fff3cd; padding: 15px; margin-bottom: 20px; border-radius: 5px; border: 1px solid #ffeeba;">
-                        <strong>Примечание:</strong> Этот анализ основан на выборке из {len(results_to_process)} сообщений из общего объема вашей беседы ({len(results)} сообщений).
-                        Выборка включает начало, середину и конец вашего чата для обеспечения сбалансированного анализа.
-                    </div>
-                    """
-                    html_content = re.sub(body_pattern, lambda m: m.group(0) + sampling_notice, html_content)
-            
-            # --- Insert banner with total messages analysed ---
-            msg_banner = (
-                f"""
-                <div style=\"background-color:#e8f4fd;padding:12px;margin-bottom:20px;border-left:4px solid #3498db;\">
-                    Отчёт подготовлен после анализа <b>{total_messages}</b> сообщений обеих сторон.
-                </div>
-                """
-            )
-            body_tag_re = re.compile(r"<body[^>]*>", re.IGNORECASE)
-            html_content, subs = body_tag_re.subn(lambda m: m.group(0)+msg_banner, html_content, count=1)
-            if subs == 0:
-                html_content = msg_banner + html_content
-            
-            # ---- Programmatically generate SVG charts to guarantee visuals ----
-            try:
-                svgs: List[str] = []
-
-                # 1. Sentiment timeline
-                svgs.append(generate_sentiment_timeline_svg(timeline_data))
-
-                # 2. Radar chart of core metrics per author
-                svgs.append(generate_radar_chart_svg(metrics_summary))
-
-                # 3. Bar chart of overall toxicity per author
-                toxicity_totals = {a: round(m.get("toxicity", 0), 3) for a, m in metrics_summary.items()}
-                svgs.append(generate_bar_chart_svg(toxicity_totals, "Средний уровень токсичности", chart_id="chart-3"))
-
-                # 4. Bar chart of manipulation per author
-                manip_totals = {a: round(m.get("manipulation", 0), 3) for a, m in metrics_summary.items()}
-                svgs.append(generate_bar_chart_svg(manip_totals, "Манипулятивность", chart_id="chart-4"))
-
-                # 5. Bar chart of assertiveness per author
-                assert_totals = {a: round(m.get("assertiveness", 0), 3) for a, m in metrics_summary.items()}
-                svgs.append(generate_bar_chart_svg(assert_totals, "Ассертивность", chart_id="chart-5"))
-
-                # 6. Bar chart of empathy per author
-                empathy_totals = {a: round(m.get("empathy", 0), 3) for a, m in metrics_summary.items()}
-                svgs.append(generate_bar_chart_svg(empathy_totals, "Эмпатия", chart_id="chart-6"))
-
-                # 7. Bar chart of horsemen overall (summing authors)
-                horsemen_totals = {}
-                for a, m in metrics_summary.items():
-                    for k, v in m.items():
-                        if k.startswith("horsemen_"):
-                            horsemen_totals[k.replace("horsemen_", "")] = horsemen_totals.get(k.replace("horsemen_", ""), 0) + v
-                if horsemen_totals:
-                    svgs.append(generate_bar_chart_svg(horsemen_totals, "Четыре всадника", chart_id="chart-7"))
-
-                # Replace placeholder <p class="chart-placeholder"> elements sequentially
-                for svg in svgs:
-                    placeholder_idx = html_content.find("class=\"chart-placeholder\"")
-                    if placeholder_idx == -1:
-                        break
-                    # Replace entire placeholder paragraph tag
-                    import re as _re
-                    html_content = _re.sub(r'<p class="chart-placeholder">[\s\S]*?</p>', svg, html_content, count=1)
-            except Exception as gerr:
-                logger.warning(f"Graphic injection failed: {gerr}")
-
-            return html_content, tokens_used_meta
-            
         except openai.RateLimitError as e:
             retry_count += 1
-            logger.warning(f"Rate limit exceeded (attempt {retry_count}/{max_retries}): {e}")
-            
+            logger.warning(f"Rate limit exceeded for meta report (attempt {retry_count}/{max_retries}): {e}")
             if retry_count <= max_retries:
-                logger.info(f"Retrying in {backoff_time} seconds...")
-                time.sleep(backoff_time)
-                backoff_time *= 2  # Exponential backoff
-                
-                # If this is the last retry, reduce the sample size further
-                if retry_count == max_retries and len(results_to_process) > 150:
-                    # Reduce to about 150 messages for the final attempt
-                    results_to_process = get_balanced_sample(results, 150)
-                    results_json = json.dumps(results_to_process, indent=None, ensure_ascii=False)
-                    logger.info(f"Финальная попытка с уменьшенной выборкой из {len(results_to_process)} сообщений")
+                logger.info(f"Retrying meta report in {backoff_time} seconds...")
+                await asyncio.sleep(backoff_time) # Use asyncio.sleep
+                backoff_time *= 2
+                if retry_count == max_retries and len(results_to_process_sampled) > 150: # Last resort reduction
+                    results_to_process_sampled = get_balanced_sample(results_to_process_clean, 150)
+                    final_results_json_for_llm = json.dumps(results_to_process_sampled, indent=None, ensure_ascii=False)
+                    logger.info(f"Final meta attempt with further reduced sample: {len(results_to_process_sampled)} messages.")
             else:
-                logger.error("Достигнуто максимальное количество попыток. Возвращаем шаблон ошибки.")
-                return f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <meta charset="UTF-8">
-                    <title>Chat X-Ray: Ошибка отчета</title>
-                    <style>
-                        body {{ font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }}
-                        h1 {{ color: #e74c3c; text-align: center; }}
-                        .error {{ background-color: #f8d7da; padding: 20px; border-radius: 5px; }}
-                        .suggestion {{ background-color: #e8f4fd; padding: 15px; border-radius: 5px; margin-top: 20px; }}
-                    </style>
-                </head>
-                <body>
-                    <h1>Ошибка при создании отчета</h1>
-                    <div class="error">
-                        <p>При анализе вашего чата произошла ошибка:</p>
-                        <p><strong>{str(e)}</strong></p>
-                        <p>Пожалуйста, попробуйте еще раз позже или обратитесь в службу поддержки, если проблема не исчезнет.</p>
-                    </div>
-                    <div class="suggestion">
-                        <p><strong>Возможные решения:</strong></p>
-                        <ul>
-                            <li>Загрузите файл меньшего размера</li>
-                            <li>Убедитесь, что файл содержит текстовые сообщения в правильном формате</li>
-                            <li>Попробуйте снова через несколько минут</li>
-                        </ul>
-                    </div>
-                </body>
-                </html>
-                """, 0
-                
-        except openai.OpenAIError as e:
-            logger.error(f"OpenAI API error in meta analysis: {e}")
+                logger.error("Max retries reached for meta report generation due to rate limits.")
+                html_content = _generate_error_html(str(e), "Rate limit error after multiple retries.")
+                return html_content, 0
+        
+        except openai.OpenAIError as e: # Catch other OpenAI errors
+            logger.error(f"OpenAI API error during meta report generation: {e}")
+            if "context_length_exceeded" in str(e).lower():
+                logger.warning("Context length exceeded for meta report. Trying with minimal sample.")
+                # This logic might need to be more robust, potentially reducing target_token_budget_for_results further
+                # or using an even smaller minimal_sample_size_fallback for this specific error.
+                # For now, the loop for adaptive reduction should handle this if it's systematically too large.
+                # If it happens *after* sampling, it means the prompt + sampled data is still too big.
+                # Fallback to error HTML for now if this specific error is not resolved by retries or sampling.
+                html_content = _generate_error_html(str(e), "Context length exceeded.")
+                return html_content, 0 # Bail out on context length errors not caught by sampling
+
+            # Generic retry for other API errors
+            retry_count += 1
+            if retry_count <= max_retries:
+                logger.info(f"Retrying meta report due to API error in {backoff_time} seconds...")
+                await asyncio.sleep(backoff_time)
+                backoff_time *= 2
+            else:
+                logger.error("Max retries reached for meta report generation due to API errors.")
+                html_content = _generate_error_html(str(e), "API error after multiple retries.")
+                return html_content, 0
+        except Exception as e: # Catch any other unexpected error
+            logger.exception(f"Unexpected error during meta report generation: {e}")
+            html_content = _generate_error_html(str(e), "An unexpected error occurred.")
+            return html_content, 0
+
+
+    # Post-processing HTML
+    if html_content:
+        # --- Inject additional CSS for better readability ---
+        def _inject_css(html_str: str) -> str:
+            import re
+            style_block = """
+            <style>
+                body { font-size: 16px; line-height: 1.7; } /* Adjusted for typical screen reading */
+                h1 { font-size: 28px; margin-bottom: 25px; }
+                h2 { font-size: 22px; margin-top: 35px; margin-bottom: 15px; }
+                h3 { font-size: 18px; margin-top: 25px; margin-bottom: 10px; }
+                svg text { font-family: Arial, sans-serif; font-size: 12px; } /* Smaller SVG text */
+                .quote { border-left: 4px solid #3498db; padding: 10px 15px; margin: 20px 0; background-color: #f8f9fa; }
+                .quote p { margin: 5px 0; }
+                .quote-author { font-weight: bold; color: #555; }
+                .quote-emotion { color: #777; font-size: 0.9em; }
+                .chart-container { background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 25px 0; overflow-x: auto; } /* Added container for charts */
+            </style>
+            """
+            head_match = re.search(r"<head[^>]*>", html_str, re.IGNORECASE)
+            if head_match:
+                insert_pos = head_match.end()
+                return html_str[:insert_pos] + style_block + html_str[insert_pos:]
+            return style_block + html_str # Fallback if no head tag
+
+        html_content = _inject_css(html_content)
+
+        import html as _html_module
+        html_content = _html_module.unescape(html_content)
+
+        import re
+        leading_html_match = re.search(r'(<!DOCTYPE html[\s\S]*|<html[\s\S]*)', html_content, re.IGNORECASE)
+        if leading_html_match:
+            html_content = leading_html_match.group(1).lstrip()
+        
+        _html_start = html_content.lstrip()[:40].lower()
+        if not (_html_start.startswith("<!doctype html") or _html_start.startswith("<html")):
+            logger.warning("Meta report output doesn't seem to start with valid HTML doctype/tag. Wrapping it.")
+            # This basic wrapper might be too simple if the LLM produced partial HTML or just text.
+            # The prompt strongly guides for full HTML.
+            html_content = f"""<!DOCTYPE html>
+                            <html><head><meta charset="UTF-8">
+                            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                            <title>Chat X-Ray: Психологический анализ отношений</title></head><body>
+                            <h1>Отчет (Возможно, неполный)</h1><div>{html_content}</div></body></html>"""
+
+        if "<meta name=\"viewport\"" not in html_content:
+            html_content = html_content.replace("<head>", "<head>\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">", 1)
             
-            if "context_length_exceeded" in str(e):
-                # Handle context length exceeded error specifically
-                logger.warning("Context length exceeded, trying with a minimal sample")
-                
-                # Use a much smaller sample for this retry
-                minimal_sample_size = 200
-                minimal_sample = get_balanced_sample(results, minimal_sample_size)
-                results_json = json.dumps(minimal_sample, indent=None, ensure_ascii=False)
-                
-                logger.info(f"Retrying with minimal sample of {len(minimal_sample)} messages")
-                
-                # Generate quotes prompt from all key quotes
-                quotes_prompt = ""
-                if all_key_quotes:
-                    quotes_json = json.dumps(all_key_quotes[:60], indent=None, ensure_ascii=False)
-                    quotes_prompt = f"""
-                    ВАЖНО: Включите эти ключевые цитаты в раздел "Ключевые цитаты", даже если они не присутствуют в сокращенной выборке сообщений:
-                    {quotes_json}
-                    """
-                
-                # Try once more with the minimal sample
-                try:
-                    response = await client.chat.completions.create(
-                        model=settings.META_MODEL,
-                        messages=[
-                            {"role": "system", "content": META_PROMPT},
-                            {"role": "user", "content": f"Создайте психологический отчет на РУССКОМ языке на основе этой выборки сообщений:\n\n{results_json}\n\n{quotes_prompt}"}
-                        ],
-                        temperature=0.7,
-                        max_tokens=4096,
-                        n=1
-                    )
-                    
-                    html_content = response.choices[0].message.content
-                    tokens_used_meta = response.usage.total_tokens if hasattr(response, "usage") and response.usage else 0
-                    
-                    # Decode numeric character references to proper Unicode
-                    import html as _html_module
-                    html_content = _html_module.unescape(html_content)
-                    
-                    # Add sampling disclaimer
-                    import re
-                    body_pattern = r'<body[^>]*>'
-                    if re.search(body_pattern, html_content):
-                        sampling_notice = f"""
-                        <div style="background-color: #fff3cd; padding: 15px; margin-bottom: 20px; border-radius: 5px; border: 1px solid #ffeeba;">
-                            <strong>Примечание:</strong> Из-за большого размера вашей беседы ({len(results)} сообщений), 
-                            анализ основан на минимальной выборке из {len(minimal_sample)} сообщений, чтобы обеспечить 
-                            оптимальную работу искусственного интеллекта. Выборка включает сообщения из начала, 
-                            середины и конца вашего чата для обеспечения сбалансированного анализа.
-                        </div>
-                        """
-                        html_content = re.sub(body_pattern, lambda m: m.group(0) + sampling_notice, html_content)
-                        
-                    return html_content, tokens_used_meta
-                except Exception as inner_error:
-                    logger.error(f"Error in retry with minimal sample: {inner_error}")
+        # Add sampling disclaimer if applicable
+        # results_to_process_sampled is the actual data sent to LLM. 'results' is the full primary analysis.
+        if len(results_to_process_sampled) < len(results_to_process_clean): # Compare sampled vs full cleaned list
+            import re
+            body_pattern = r'<body[^>]*>'
+            disclaimer_text = f"""
+            <div style="background-color: #fff3cd; color: #856404; padding: 15px; margin-bottom: 20px; border-radius: 5px; border: 1px solid #ffeeba;">
+                <strong>Примечание о выборке:</strong> Этот анализ основан на автоматически отобранной выборке из {len(results_to_process_sampled)} проанализированных сегментов сообщений 
+                (из общего числа {len(results_to_process_clean)} доступных сегментов после первичной обработки {len(results)} исходных сообщений).
+                Выборка стремится охватить начало, середину и конец чата для сбалансированного анализа в рамках установленного бюджета.
+            </div>
+            """
+            if re.search(body_pattern, html_content):
+                html_content = re.sub(body_pattern, lambda m: m.group(0) + disclaimer_text, html_content, count=1)
+            else:
+                html_content = disclaimer_text + html_content
+
+        msg_banner = (
+            f"""
+            <div style=\"background-color:#e8f4fd; color: #1e4271; padding:12px; margin-bottom:20px; border-left:4px solid #3498db;\">
+                Отчёт подготовлен после анализа <b>{total_messages}</b> сообщений из вашего чата.
+            </div>
+            """
+        )
+        body_tag_re = re.compile(r"<body[^>]*>", re.IGNORECASE)
+        html_content, subs = body_tag_re.subn(lambda m: m.group(0)+msg_banner, html_content, count=1)
+        if subs == 0: html_content = msg_banner + html_content
+        
+        # ---- Programmatically generate SVG charts ----
+        try:
+            svgs_to_inject: List[str] = []
+            # Ensure metrics_summary and svg_timeline_data are available and correct for these functions
             
-            # Return a basic error HTML
-            return f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="UTF-8">
-                <title>Chat X-Ray: Ошибка отчета</title>
-                <style>
-                    body {{ font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }}
-                    h1 {{ color: #e74c3c; text-align: center; }}
-                    .error {{ background-color: #f8d7da; padding: 20px; border-radius: 5px; }}
-                    .suggestion {{ background-color: #e8f4fd; padding: 15px; border-radius: 5px; margin-top: 20px; }}
-                </style>
-            </head>
-            <body>
-                <h1>Ошибка при создании отчета</h1>
-                <div class="error">
-                    <p>При анализе вашего чата произошла ошибка:</p>
-                    <p><strong>{str(e)}</strong></p>
-                    <p>Пожалуйста, попробуйте еще раз позже или обратитесь в службу поддержки, если проблема не исчезнет.</p>
-                </div>
-                <div class="suggestion">
-                    <p><strong>Возможные решения:</strong></p>
-                    <ul>
-                        <li>Загрузите файл меньшего размера</li>
-                        <li>Убедитесь, что файл содержит текстовые сообщения в правильном формате</li>
-                        <li>Попробуйте снова через несколько минут</li>
-                    </ul>
-                </div>
-            </body>
-            </html>
-            """, 0 
+            # 1. Sentiment timeline (svg_timeline_data needs to be correctly computed for this)
+            # The compute_timeline was simplified; let's assume graphics.py can handle raw segments or needs specific format.
+            # For now, let's rely on data within metrics_summary for other charts if timeline is too complex to quickly re-integrate.
+            # svgs_to_inject.append(generate_sentiment_timeline_svg(svg_timeline_data)) # This needs correctly formatted svg_timeline_data
+
+            # 2. Radar chart of core metrics per author
+            if metrics_summary: svgs_to_inject.append(generate_radar_chart_svg(metrics_summary))
+
+            # 3. Bar chart of overall toxicity per author
+            toxicity_totals = {a: round(m.get("toxicity",0),3) for a,m in metrics_summary.items() if m}
+            if toxicity_totals: svgs_to_inject.append(generate_bar_chart_svg(toxicity_totals, "Средний уровень токсичности по авторам", chart_id="chart-toxicity"))
+
+            manip_totals = {a: round(m.get("manipulation",0),3) for a,m in metrics_summary.items() if m}
+            if manip_totals: svgs_to_inject.append(generate_bar_chart_svg(manip_totals, "Уровень манипулятивности по авторам", chart_id="chart-manipulation"))
+            
+            assert_totals = {a: round(m.get("assertiveness",0),3) for a,m in metrics_summary.items() if m}
+            if assert_totals: svgs_to_inject.append(generate_bar_chart_svg(assert_totals, "Уровень ассертивности по авторам", chart_id="chart-assertiveness"))
+
+            empathy_totals = {a: round(m.get("empathy",0),3) for a,m in metrics_summary.items() if m}
+            if empathy_totals: svgs_to_inject.append(generate_bar_chart_svg(empathy_totals, "Уровень эмпатии по авторам", chart_id="chart-empathy"))
+
+            horsemen_overall = defaultdict(float)
+            for author_metrics in metrics_summary.values():
+                for key, value in author_metrics.items():
+                    if key.startswith("horsemen_"):
+                        horsemen_overall[key.replace("horsemen_","").capitalize()] += value
+            if horsemen_overall:
+                avg_horsemen = {k: round(v / len(metrics_summary) if metrics_summary else 0, 3) for k,v in horsemen_overall.items()}
+                svgs_to_inject.append(generate_bar_chart_svg(avg_horsemen, "Среднее проявление \"Всадников Апокалипсиса\"", chart_id="chart-horsemen"))
+
+            chart_container_template = "<div class='chart-container'>{}</div>"
+            for svg_code in svgs_to_inject:
+                styled_svg = chart_container_template.format(svg_code)
+                # Replace placeholders sequentially. Ensure META_PROMPT asks for these placeholders.
+                html_content = re.sub(r'<p class="chart-placeholder">[\s\S]*?</p>', styled_svg, html_content, count=1)
+            
+            # Remove any remaining placeholders if not enough SVGs were generated
+            html_content = re.sub(r'<p class="chart-placeholder">[\s\S]*?</p>', '<p><i>(Визуализация для этого раздела не была сгенерирована.)</i></p>', html_content)
+
+        except Exception as gerr:
+            logger.warning(f"Programmatic SVG injection failed: {gerr}", exc_info=True)
+
+    return html_content, tokens_used_meta
+
+def _generate_error_html(error_message: str, details: str = "") -> str:
+    # Sanitize error_message for HTML display
+    import html as _html_module
+    safe_error_message = _html_module.escape(error_message)
+    safe_details = _html_module.escape(details)
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Chat X-Ray: Ошибка отчета</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 800px; margin: auto; padding: 20px; background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 8px; }}
+            h1 {{ color: #d9534f; text-align: center; }}
+            .error-box {{ background-color: #f2dede; color: #a94442; padding: 15px; border-radius: 5px; border: 1px solid #ebccd1; margin-bottom: 20px; }}
+            .error-box strong {{ font-size: 1.1em; }}
+            .suggestion {{ background-color: #d9edf7; color: #31708f; padding: 15px; border-radius: 5px; border: 1px solid #bce8f1; }}
+            ul {{ padding-left: 20px; }}
+            li {{ margin-bottom: 8px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Ошибка при создании отчета</h1>
+            <div class="error-box">
+                <p><strong>При анализе вашего чата произошла критическая ошибка:</strong></p>
+                <p>{safe_details}</p>
+                <p><i>Детали ошибки: {safe_error_message}</i></p>
+                <p>Пожалуйста, попробуйте еще раз позже. Если проблема не исчезнет, возможно, чат слишком большой или имеет необычный формат.</p>
+            </div>
+            <div class="suggestion">
+                <p><strong>Возможные быстрые решения:</strong></p>
+                <ul>
+                    <li>Попробуйте загрузить файл меньшего размера (например, часть текущего чата).</li>
+                    <li>Убедитесь, что файл содержит текстовые сообщения в стандартном формате (например, экспорт из WhatsApp или Telegram).</li>
+                    <li>Попробуйте снова через несколько минут, возможно, это была временная проблема с сервисом анализа.</li>
+                </ul>
+            </div>
+        </div>
+    </body>
+    </html>
+    """ 

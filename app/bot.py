@@ -423,8 +423,39 @@ async def handle_document(message: Message):
             logger.info(f"Report URL: {report_url}")
             
             # Calculate and log approximate cost
-            approx_cost = (primary_tokens * settings.GPT35_COST_PER_TOKEN) + (meta_tokens * settings.GPT4_TURBO_COST_PER_TOKEN)
-            await log_cost(message.from_user.id, num_chunks, approx_cost)
+            # primary_tokens are from GPT35_MODEL, meta_tokens are from META_MODEL (GPT-4-Turbo)
+            # Ensure costs are per token, not per 1K tokens, or adjust calculation.
+            # Current config vars are COST_PER_1K_TOKENS_*
+            cost_primary = (primary_tokens / 1000) * settings.COST_PER_1K_TOKENS_GPT35_TURBO
+            
+            # For meta_tokens, we need to know if it includes prompt and completion tokens to use separate costs.
+            # Assuming meta_tokens is total tokens from the call. 
+            # A more precise way: get prompt_tokens and completion_tokens from usage.
+            # For simplicity, if meta_tokens is total, use a weighted average or dominant cost (e.g. input).
+            # Let's assume meta_tokens refers to total tokens from the GPT-4 call.
+            # We'll use separate input/output costs if available from response, else approximate.
+            # The generate_meta_report currently returns total_tokens from usage.
+            # We need to decide how to split this for costing if using separate input/output rates.
+            # For now, let's use an average or assume input cost dominates if usage isn't split here.
+            # As a simplification, if response.usage has prompt_tokens and completion_tokens, use them.
+            # However, generate_meta_report only returns `tokens_used_meta`. 
+            # We will assume this is total and use a combined/average logic if we don't get a breakdown.
+            # For a single call, it is better to use the specific input/output costs from the API response if possible.
+            # The `generate_meta_report` should ideally return (html, prompt_tokens, completion_tokens)
+            # For now, treating `meta_tokens` as total and using a simplified approach:
+            # This example assumes meta_tokens could be split or an average cost is applied.
+            # If meta_tokens is total, and we have input/output cost, we can't precisely apply them without the split.
+            # Let's assumeCOST_PER_1K_TOKENS_GPT4_TURBO_INPUT is representative for the bulk of meta_tokens or an average.
+            # A better way is to get input and output tokens from the response in generate_meta_report.
+            # Given the current structure, where generate_meta_report returns `tokens_used_meta` (total):
+            # It's hard to apply separate input/output costs accurately here.
+            # Option 1: Assume an average cost for GPT-4 Turbo for `meta_tokens`.
+            # (settings.COST_PER_1K_TOKENS_GPT4_TURBO_INPUT + settings.COST_PER_1K_TOKENS_GPT4_TURBO_OUTPUT) / 2
+            avg_gpt4_turbo_cost_per_1k = (settings.COST_PER_1K_TOKENS_GPT4_TURBO_INPUT + settings.COST_PER_1K_TOKENS_GPT4_TURBO_OUTPUT) / 2.0
+            cost_meta = (meta_tokens / 1000) * avg_gpt4_turbo_cost_per_1k
+
+            approx_total_cost = cost_primary + cost_meta
+            await log_cost(str(message.from_user.id), num_chunks, approx_total_cost)
             
             # Extract insights for Telegram message
             logger.info("Extracting insights for Telegram message")
